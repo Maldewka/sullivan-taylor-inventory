@@ -23,7 +23,7 @@ function inventory(){
  if(!S.draft)S.draft={id:uid(),started:new Date().toISOString(),counts:{}};
  const d=S.draft;d.skipped=d.skipped||{};
  let h=`<div class="bar"><div style="flex:1"><b>Count date:</b> <input type="date" id="cdate" value="${d.date||today()}"> <span class="muted">started ${fmt(d.started)}</span></div>
- <button id="saveCount">Save count</button><button class="light" id="newCount">New count</button></div>`;
+ <button id="saveCount">Save count</button><button class="light" id="newCount">New count</button><span class="muted lastSaved">${lastSavedText()}</span></div>`;
  for(const g of S.headers){if(!g.items.length)continue;h+=`<div class="card"><h3 class="ghead">${esc(g.name)}</h3>`;
   for(const i of g.items){const c=d.counts[i.id],sk=!!d.skipped[i.id];h+=`<div class="item${sk?' skipped':''}" data-item="${i.id}"><div class="name">${esc(i.name)}<div class="muted">${sk?'Skipped this week':'PAR '+i.par}</div></div>
   <input type="number" inputmode="decimal" step="any" min="0" data-id="${i.id}" value="${sk?'':c??''}" placeholder="${sk?'—':'count'}" ${sk?'disabled':''} aria-label="count ${esc(i.name)}"><button class="light sm skipBtn" data-id="${i.id}" aria-pressed="${sk}">${sk?'Unskip':'Skip'}</button></div>`}
@@ -35,11 +35,13 @@ function inventory(){
  saveCount.onclick=()=>{const blanks=S.headers.flatMap(g=>g.items).filter(i=>!d.skipped[i.id]&&d.counts[i.id]==null).map(i=>i.name);
   if(blanks.length){const counted=Object.keys(d.counts).length;const list=blanks.slice(0,8).map(n=>'• '+n).join('\n')+(blanks.length>8?`\n+${blanks.length-8} more`:'');
    if(!confirm((counted?'These items have no count:\n':'No counts entered. These items have no count:\n')+list+'\n\nSave anyway?'))return}
-  S.snapshots.push({id:d.id,date:d.date||today(),savedAt:new Date().toISOString(),groups:freeze(d.counts,d.skipped)});S.draft=null;save();tab='orders';render()};
- newCount.onclick=()=>{if((Object.keys(d.counts).length||Object.keys(d.skipped).length)&&!confirm('Discard the unsaved count and start a new one?'))return;S.draft=null;save();render()};
+  {const dt=d.date||today();const snap={id:d.id,date:dt,savedAt:new Date().toISOString(),groups:freeze(d.counts,d.skipped)};const ix=S.snapshots.findIndex(x=>x.date===dt);if(ix>=0){snap.id=S.snapshots[ix].id;S.snapshots.splice(ix,1)}S.snapshots.push(snap)}S.draft=null;save();tab='orders';render()};
+ newCount.onclick=()=>{const has=Object.keys(d.counts).length||Object.keys(d.skipped).length;if(has&&!confirm('Discard the unsaved count and start a new one?'))return;S.draft=null;S.ordersClearedAt=new Date().toISOString();save();render();toast('New count started. Order List cleared.')};
 }
+function lastSavedText(){const t=S.snapshots.map(x=>x.savedAt).filter(Boolean).sort().pop();if(!t)return 'Not saved yet';const d=new Date(t);return 'Last saved '+d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+', '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}
+function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.classList.add('show');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('show'),2600)}
 // ORDERS
-function orders(){const s=latest();if(!s){V.innerHTML=`<div class="card empty">No saved counts yet. Do a count in the <b>Inventory</b> tab.</div>`;return}
+function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s.savedAt){V.innerHTML=`<div class="card empty">New count started. The Order List will fill in when you tap <b>Save count</b>. Earlier order lists are in <b>History</b>.</div>`;return}if(!s){V.innerHTML=`<div class="card empty">No saved counts yet. Do a count in the <b>Inventory</b> tab.</div>`;return}
  V.innerHTML=`<p class="muted">From count on <b>${s.date}</b> (saved ${fmt(s.savedAt)})</p>`+orderHtml(s)}
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}

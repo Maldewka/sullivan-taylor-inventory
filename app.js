@@ -46,7 +46,7 @@ function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s
  V.innerHTML=`<p class="muted">From count on <b>${s.date}</b> (saved ${fmt(s.savedAt)})</p>`+orderHtml(s)}
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
-function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div></div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?'<span class="muted">Not counted</span>':`<b>${i.count}</b>`}</div>`).join('')+`</div>`).join('')}
+function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?'<span class="muted">Not counted</span>':`<b>${i.count}</b>`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only, used by Sales + receipt, never on Order List/Inventory)
 const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
@@ -102,7 +102,7 @@ function salesMoney(used){ // per line: [name, sold, cost|null, line|null]; subt
  let grand=0,missing=0;const groups=used.map(([hn,items])=>{let sub=0,subN=0;const rows=items.map(([n,q])=>{const c=costOf(hn,n);if(c===null){missing++;return[n,q,null,null]}const t=Math.round(q*c*100)/100;sub+=t;subN++;return[n,q,c,t]});
   sub=Math.round(sub*100)/100;grand+=sub;return{hn,rows,sub,subN}});
  return{groups,grand:Math.round(grand*100)/100,missing}}
-function salesEmpty(r){if(S.snapshots.length<2)return'Need at least two saved counts to see sales. The drop between one count and the next is what sold.';
+function salesEmpty(r){if(S.snapshots.length<2)return'Need at least two saved counts to see sales and their cost. The drop between one count and the next is what sold.';
  if(r.pairs===0)return'No count pairs fall in this window yet. Try a longer window or another end date, or save another count.';
  if(!salesUsed(r).length)return'Nothing sold in this window — counts didn’t drop between saves.';return''}
 function salesWinBtns(kind){return Object.entries(SALES_WINDOWS).map(([k,v])=>`<button type="button" class="sm ${k===kind?'on':''}" data-sw="${k}" aria-pressed="${k===kind}">${v.label}</button>`).join('')}
@@ -131,7 +131,16 @@ let preKind=null;
 function enterPrint(){printMode=true;preKind=salesKind();localStorage.setItem(SALES_KEY,'biweekly');reorderMode=false;document.body.classList.remove('reorder');render();window.scrollTo(0,0)}
 function exitPrint(){printMode=false;if(preKind==='off')localStorage.setItem(SALES_KEY,'off');preKind=null; // History sales stay off if they were off
  render();window.scrollTo(0,0)}
-function printView(){
+function orderReceiptHtml(){ // same list as the Order List tab (latest saved count, respects New count). No cost here.
+ const s=latest();let body;
+ if(!s)body=`<p class="rEmpty">No saved count yet. Count on the Inventory tab, then tap Save count.</p>`;
+ else if(S.ordersClearedAt&&S.ordersClearedAt>=s.savedAt)body=`<p class="rEmpty">New count started. The list fills in when you tap Save count.</p>`;
+ else{const L=shortList(s.groups);
+  body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`+(L.length?L.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+g.items.map(i=>`<div class="rOLine"><span class="rName">${esc(i.name)}</span><span class="rDots"></span><span class="rNeed">${i.need}</span></div><div class="rCost"><span>have ${i.count} / par ${i.par}</span></div>`).join('')+`</div>`).join(''):`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`)}
+ return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rSales">To order</h2>${body}</section>`}
+function printView(){try{printViewInner()}catch(e){ // never leave a blank page: show what went wrong
+ console.error(e);document.getElementById('printView').innerHTML=`<div class="pvCtl"><div class="pvBtns"><button type="button" class="light" id="pvBack">← Back</button></div></div><article class="receipt"><div class="rTitle">Sullivan Taylor Uptown</div><p class="rEmpty">Couldn’t build the print view: ${esc(e&&e.message||e)}</p></article>`;pvBack.onclick=exitPrint}}
+function printViewInner(){
  const P=document.getElementById('printView');const kind=salesKind();const r=computeSales(kind);const msg=salesEmpty(r);
  let lines;if(msg)lines=`<p class="rEmpty">${esc(msg)}</p>`;else{const M=salesMoney(salesUsed(r));
  lines=M.groups.map(g=>`<div class="rGroup"><div class="rHead">${esc(g.hn)}</div>`+g.rows.map(([n,q,c,t])=>`<div class="rLine"><span class="rName">${esc(n)}</span><span class="rDots"></span><span class="rQty">${q}</span></div><div class="rCost"><span class="rEach">${q} @ ${c===null?'—':money(c)}</span><span class="rDots"></span><span class="rTot">${t===null?'—':money(t)}</span></div>`).join('')
@@ -141,12 +150,14 @@ function printView(){
  P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print sales">Print…</button></div>
  <div class="bar salesBar pvSales">${salesControlsHtml(kind)}</div>
  <p class="muted pvHint">Pick the last day to include. Bi-weekly covers the 14 days ending that day, from the count on the start day to the count on the end day — pick a Sunday for Sunday-to-Sunday.</p></div>
- <article class="receipt" aria-label="Printable sales">
+ <article class="receipt" aria-label="Printable sales and order list">
  <div class="rTitle">Sullivan Taylor Uptown</div><h2 class="rSales">Sales</h2>
  <div class="rRange">${esc(rangeText(r))}</div><div class="rWin">${esc(SALES_WINDOWS[kind].label)} · ${r.days} days</div>
  <div class="rRule"></div><div class="rCols"><span>ITEM / QTY @ COST</span><span>SOLD / TOTAL</span></div><div class="rRule thin"></div>
  ${lines}
- <div class="rRule"></div><div class="rFoot">Sold = drop between saved counts (restocks not counted).<br>${r.pairs} count ${r.pairs===1?'pair':'pairs'} · printed ${esc(now.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}))} ${esc(now.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}))}</div></article>`;
+ <div class="rFoot rSalesFoot">Sold = drop between saved counts (restocks not counted). ${r.pairs} count ${r.pairs===1?'pair':'pairs'}.</div>
+ ${orderReceiptHtml()}
+ <div class="rRule"></div><div class="rFoot">Printed ${esc(now.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}))} ${esc(now.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}))}</div></article>`;
  pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();bindSales(P)}
 function historyTab(){ // (not named "history": that would hide the browser's window.history)
  if(histSel){const s=S.snapshots.find(x=>x.id===histSel);

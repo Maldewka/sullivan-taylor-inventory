@@ -164,3 +164,7 @@ body.reorder .item label.icostL input{width:56px}
  .dbItem .ipar{width:60px}input.icost{width:76px}
  body.reorder .dbItem label.muted{font-size:.9rem}body.reorder .dbItem label.muted input{width:60px}body.reorder .dbItem label.icostL input{width:76px}
 }
+.rNeed{white-space:nowrap;text-align:right;min-width:3ch;font-weight:700}.rOrder .rRange{margin-bottom:2px}
+.rOGroup{margin:0 0 8px}.rOLine{display:flex;align-items:baseline;gap:4px;padding-left:1ch}
+.rSalesFoot{margin-top:6px}
+.sales .cEach{font-size:.88rem;color:#5d4a3f;white-space:nowrap}.badge{white-space:nowrap}

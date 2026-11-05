@@ -47,6 +47,11 @@ function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
 function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div></div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?'<span class="muted">Not counted</span>':`<b>${i.count}</b>`}</div>`).join('')+`</div>`).join('')}
+// COST (what the shop paid per unit; Database only, used by Sales + receipt, never on Order List/Inventory)
+const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
+function parseCost(v){v=String(v).trim().replace(/[$,\s]/g,'');if(v==='')return null;const n=Number(v);return isFinite(n)&&n>=0?Math.round(n*100)/100:NaN}
+function costOf(hn,n){for(const h of S.headers)if(h.name===hn)for(const i of h.items)if(i.name===n&&hasCost(i))return i.cost;return null} // current Database cost, matched by header + item name
 // HISTORY
 const SALES_KEY='coffeeInventory.salesWindow';
 const SALES_WINDOWS={weekly:{days:7,label:'Weekly'},biweekly:{days:14,label:'Bi-weekly'},monthly:{days:30,label:'Monthly'},quarterly:{days:90,label:'Quarterly'}};
@@ -93,6 +98,10 @@ function computeSales(kind){
 }
 function salesUsed(r){const order=[...S.headers.map(h=>h.name)];for(const n of Object.keys(r.totals))if(!order.includes(n))order.push(n);
  return order.filter(n=>r.totals[n]&&Object.keys(r.totals[n]).length).map(hn=>[hn,Object.entries(r.totals[hn]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))])}
+function salesMoney(used){ // per line: [name, sold, cost|null, line|null]; subtotal per category; grand total of costed lines only
+ let grand=0,missing=0;const groups=used.map(([hn,items])=>{let sub=0,subN=0;const rows=items.map(([n,q])=>{const c=costOf(hn,n);if(c===null){missing++;return[n,q,null,null]}const t=Math.round(q*c*100)/100;sub+=t;subN++;return[n,q,c,t]});
+  sub=Math.round(sub*100)/100;grand+=sub;return{hn,rows,sub,subN}});
+ return{groups,grand:Math.round(grand*100)/100,missing}}
 function salesEmpty(r){if(S.snapshots.length<2)return'Need at least two saved counts to see sales. The drop between one count and the next is what sold.';
  if(r.pairs===0)return'No count pairs fall in this window yet. Try a longer window or another end date, or save another count.';
  if(!salesUsed(r).length)return'Nothing sold in this window — counts didn’t drop between saves.';return''}
@@ -111,7 +120,10 @@ function salesHtml(){
  const r=computeSales(kind);
  const range=`${windowText(kind,r)} · ${rangeText(r)}`;
  const msg=salesEmpty(r);
- const body=msg?`<div class="card empty">${esc(msg)}</div>`:salesUsed(r).map(([hn,items])=>`<div class="card"><h3 class="ghead">${esc(hn)}</h3>`+items.map(([n,q])=>`<div class="item"><div class="name">${esc(n)}</div><span class="sold">Sold ${q}</span></div>`).join('')+`</div>`).join('');
+ let body;if(msg)body=`<div class="card empty">${esc(msg)}</div>`;else{const M=salesMoney(salesUsed(r));
+ body=M.groups.map(g=>`<div class="card"><h3 class="ghead">${esc(g.hn)}</h3>`+g.rows.map(([n,q,c,t])=>`<div class="item"><div class="name">${esc(n)}</div><span class="sold">Sold ${q}</span><span class="costInfo"><span class="muted cEach">${c===null?'no cost':money(c)+' ea'}</span><b class="cLine">${t===null?'—':money(t)}</b></span></div>`).join('')
+  +(g.subN?`<div class="item subTot"><div class="name muted">Subtotal</div><b class="cSub">${money(g.sub)}</b></div>`:'')+`</div>`).join('')
+  +`<div class="card grandTot"><div class="item"><div class="name"><b>Total cost of items sold</b></div><b class="cGrand">${money(M.grand)}</b></div>${M.missing?`<p class="muted costNote">${M.missing} item${M.missing===1?'':'s'} without a cost ${M.missing===1?"isn't":"aren't"} in the total. Add costs in the <b>Database</b> tab.</p>`:''}</div>`}
  return`<section class="sales" aria-label="Sales"><div class="bar salesBar"><b>Sales</b>${salesControlsHtml(kind)}</div><p class="muted salesRange">${esc(range)}</p>${body}</section><h2 class="histHead">Saved counts</h2>`
 }
 // PRINT-FRIENDLY SALES VIEW (typewriter / receipt layout; @media print prints only .receipt)
@@ -121,7 +133,10 @@ function exitPrint(){printMode=false;if(preKind==='off')localStorage.setItem(SAL
  render();window.scrollTo(0,0)}
 function printView(){
  const P=document.getElementById('printView');const kind=salesKind();const r=computeSales(kind);const msg=salesEmpty(r);
- const lines=msg?`<p class="rEmpty">${esc(msg)}</p>`:salesUsed(r).map(([hn,items])=>`<div class="rGroup"><div class="rHead">${esc(hn)}</div>`+items.map(([n,q])=>`<div class="rLine"><span class="rName">${esc(n)}</span><span class="rDots"></span><span class="rQty">${q}</span></div>`).join('')+`</div>`).join('');
+ let lines;if(msg)lines=`<p class="rEmpty">${esc(msg)}</p>`;else{const M=salesMoney(salesUsed(r));
+ lines=M.groups.map(g=>`<div class="rGroup"><div class="rHead">${esc(g.hn)}</div>`+g.rows.map(([n,q,c,t])=>`<div class="rLine"><span class="rName">${esc(n)}</span><span class="rDots"></span><span class="rQty">${q}</span></div><div class="rCost"><span class="rEach">${q} @ ${c===null?'—':money(c)}</span><span class="rDots"></span><span class="rTot">${t===null?'—':money(t)}</span></div>`).join('')
+  +(g.subN?`<div class="rCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rSub">${money(g.sub)}</span></div>`:'')+`</div>`).join('')
+  +`<div class="rRule"></div><div class="rLine rGrandLine"><span class="rName">TOTAL COST</span><span class="rDots"></span><span class="rGrand">${money(M.grand)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the total.</div>`:''}`}
  const now=new Date();
  P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print sales">Print…</button></div>
  <div class="bar salesBar pvSales">${salesControlsHtml(kind)}</div>
@@ -129,7 +144,7 @@ function printView(){
  <article class="receipt" aria-label="Printable sales">
  <div class="rTitle">Sullivan Taylor Uptown</div><h2 class="rSales">Sales</h2>
  <div class="rRange">${esc(rangeText(r))}</div><div class="rWin">${esc(SALES_WINDOWS[kind].label)} · ${r.days} days</div>
- <div class="rRule"></div><div class="rCols"><span>ITEM</span><span>SOLD</span></div><div class="rRule thin"></div>
+ <div class="rRule"></div><div class="rCols"><span>ITEM / QTY @ COST</span><span>SOLD / TOTAL</span></div><div class="rRule thin"></div>
  ${lines}
  <div class="rRule"></div><div class="rFoot">Sold = drop between saved counts (restocks not counted).<br>${r.pairs} count ${r.pairs===1?'pair':'pairs'} · printed ${esc(now.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}))} ${esc(now.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}))}</div></article>`;
  pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();bindSales(P)}
@@ -152,7 +167,7 @@ function database(){
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;
-  g.items.forEach((i,ii)=>{h+=`<div class="item"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name"><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label>
+  g.items.forEach((i,ii)=>{h+=`<div class="item dbItem"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name"><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label>
    <button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
@@ -161,6 +176,9 @@ function database(){
  q('.addI').forEach(b=>b.onclick=()=>{const g=S.headers[b.dataset.g];const n=prompt(`New item under “${g.name}”:`);if(!n||!n.trim())return;const p=prompt('PAR (required stock level):','');g.items.push({id:uid(),name:n.trim(),par:Math.max(0,Number(p)||0)});save();render()});
  q('.hname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].name=e.value.trim()||'Untitled';save()});
  q('.iname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].items[e.dataset.i].name=e.value.trim()||'Untitled';save()});
+ q('.icost').forEach(e=>e.onchange=()=>{const it=S.headers[e.dataset.g].items[e.dataset.i],c=parseCost(e.value);
+  if(Number.isNaN(c)){e.value=hasCost(it)?it.cost.toFixed(2):'';toast('Cost must be a dollar amount, like 4.50');return}
+  if(c===null)delete it.cost;else{it.cost=c;e.value=c.toFixed(2)}save()});
  q('.ipar').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].items[e.dataset.i].par=Math.max(0,Number(e.value)||0);save()});
  const mv=(a,i,d)=>{const j=i+d;if(j<0||j>=a.length)return;[a[i],a[j]]=[a[j],a[i]];save();render()};
  q('.mvH').forEach(b=>b.onclick=()=>mv(S.headers,+b.dataset.g,+b.dataset.d));

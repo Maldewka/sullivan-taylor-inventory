@@ -141,3 +141,26 @@ body.printView #printView{display:block;max-width:560px;margin:0 auto;padding:14
 @media(max-width:480px){.tools{gap:3px}.tools .ghost{min-width:36px;width:36px}.top{gap:6px}}
 @media(max-width:370px){.tools{gap:2px}.tools .ghost{min-width:34px;width:34px}.tools .ico{font-size:.98rem}}
 .salesOff .salesBar{margin-bottom:6px}
+/* per-item cost (Database) and cost columns in Sales / receipt */
+input.icost{width:72px;text-align:right;min-height:44px}
+.icostL{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+@media(max-width:480px){input.icost{width:62px;padding:0 6px}.item .ipar{width:52px;padding:0 4px}}
+@media(max-width:370px){input.icost{width:56px}}
+body.reorder .item label.icostL input{width:56px}
+.sales .costInfo{display:flex;flex-direction:column;align-items:flex-end;min-width:76px;line-height:1.2}
+.sales .cEach{font-size:.8rem}.sales .cLine{color:#2b211c}
+.sales .subTot .name{text-align:right}.sales .cSub{min-width:76px;text-align:right}
+.grandTot .item{border-top:0;padding:4px 0}.grandTot .cGrand{font-size:1.15rem;color:#5b3a29}.costNote{margin:4px 0 0;font-size:.85rem}
+.rCost{display:flex;align-items:baseline;gap:4px;padding-left:3ch;font-size:13px}
+.rTot,.rSub{white-space:nowrap;text-align:right;min-width:3ch}
+.rSubLine{padding-left:1ch;font-style:italic;margin-top:2px}
+.rGrandLine{padding-left:0;font-weight:700;font-size:15px}.rGrand{font-weight:700;white-space:nowrap}
+.rNote{font-size:12px;margin-top:4px}
+/* phones: Database item rows wrap — name on its own line, then PAR, cost and the buttons */
+@media(max-width:480px){
+ .dbItem{flex-wrap:wrap;row-gap:6px}
+ .dbItem .iname{flex:1 1 100%}
+ .dbItem .icostL{margin-right:auto}
+ .dbItem .ipar{width:60px}input.icost{width:76px}
+ body.reorder .dbItem label.muted{font-size:.9rem}body.reorder .dbItem label.muted input{width:60px}body.reorder .dbItem label.icostL input{width:76px}
+}

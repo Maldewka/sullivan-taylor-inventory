@@ -26,9 +26,10 @@ input[type=number]{width:80px;text-align:center}input.nm{flex:1;min-width:0}
 .hsw button.on{background:#5b3a29;color:#fff;border-color:#5b3a29}
 .ghead{padding:8px 10px;border-radius:12px;margin:0 0 6px}
 h3.ghead{padding:10px 12px}
-body[data-hs=border] .ghead{border:2px solid #8a5a3c}
-body[data-hs=tint] .ghead{background:#e9d8c8;border:2px solid transparent}
-body[data-hs=tint] .ghead input.hname{border-color:#c9ad95}
+.ghead{border:2px solid transparent}
+body[data-hs~=tint] .ghead{background:#e9d8c8}
+body[data-hs~=tint] .ghead input.hname{border-color:#c9ad95}
+body[data-hs~=border] .ghead{border-color:#8a5a3c}
 @media(max-width:480px){.hrow.ghead input.hname{flex:1 1 100%}.hrow.ghead .addI{flex:1}}
 .item .skipBtn{min-width:76px}
 .item.skipped .name{color:#a8988d;text-decoration:line-through}

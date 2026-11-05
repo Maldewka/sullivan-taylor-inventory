@@ -1,6 +1,6 @@
 const KEY='coffeeInventory.v1';
 const DEFAULT_HEADERS=['Coffee Beans','Espresso & Decaf','Milk & Dairy','Non-Dairy Milks','Syrups & Sauces','Tea','Cups','Lids','Sleeves & Straws','Pastries & Food','Cleaning Supplies','Paper Goods & Napkins'];
-let S;let HS=localStorage.getItem('coffeeInventory.headerStyle')||'border';document.body.dataset.hs=HS;let tab='inventory';let histSel=null;let reorderMode=false; // phone-only item reorder mode (not persisted)
+let S;let HS=localStorage.getItem('coffeeInventory.headerStyle');if(HS===null)HS='border';if(HS==='both')HS='border tint';document.body.dataset.hs=HS;const hsOn=k=>HS.split(' ').includes(k);let tab='inventory';let histSel=null;let reorderMode=false; // phone-only item reorder mode (not persisted)
 function load(){const raw=localStorage.getItem(KEY);if(raw===null){const d=seeded();localStorage.setItem(KEY,JSON.stringify(d));return d}try{return JSON.parse(raw)||blank()}catch{return blank()}}
 function seeded(){const d=blank();d.headers=DEFAULT_HEADERS.map(name=>({id:uid(),name,items:[]}));return d}
 function blank(){return{headers:[],snapshots:[],draft:null}}
@@ -15,7 +15,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset
 function render(){document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history})[tab]()}
 // snapshot helpers
 function freeze(counts,skipped={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>skipped[i.id]?{name:i.name,par:i.par,count:null,skipped:true}:{name:i.name,par:i.par,count:counts[i.id]??null})}))}
-function shortList(groups){return groups.map(g=>({name:g.name,items:g.items.filter(i=>!i.skipped&&i.count!==null&&i.count<i.par).map(i=>({...i,need:i.par-i.count}))})).filter(g=>g.items.length)}
+function shortList(groups){return groups.map(g=>({name:g.name,items:g.items.filter(i=>!i.skipped&&i.count!==null&&i.count<i.par).map(i=>({...i,need:Math.ceil(+(i.par-i.count).toFixed(6))}))})).filter(g=>g.items.length)}
 function latest(){return S.snapshots[S.snapshots.length-1]}
 // INVENTORY
 function inventory(){
@@ -26,7 +26,7 @@ function inventory(){
  <button id="saveCount">Save count</button><button class="light" id="newCount">New count</button></div>`;
  for(const g of S.headers){if(!g.items.length)continue;h+=`<div class="card"><h3 class="ghead">${esc(g.name)}</h3>`;
   for(const i of g.items){const c=d.counts[i.id],sk=!!d.skipped[i.id];h+=`<div class="item${sk?' skipped':''}" data-item="${i.id}"><div class="name">${esc(i.name)}<div class="muted">${sk?'Skipped this week':'PAR '+i.par}</div></div>
-  <input type="number" inputmode="numeric" min="0" data-id="${i.id}" value="${sk?'':c??''}" placeholder="${sk?'—':'count'}" ${sk?'disabled':''} aria-label="count ${esc(i.name)}"><button class="light sm skipBtn" data-id="${i.id}" aria-pressed="${sk}">${sk?'Unskip':'Skip'}</button></div>`}
+  <input type="number" inputmode="decimal" step="any" min="0" data-id="${i.id}" value="${sk?'':c??''}" placeholder="${sk?'—':'count'}" ${sk?'disabled':''} aria-label="count ${esc(i.name)}"><button class="light sm skipBtn" data-id="${i.id}" aria-pressed="${sk}">${sk?'Unskip':'Skip'}</button></div>`}
   h+=`</div>`}
  V.innerHTML=h;
  V.querySelectorAll('input[type=number]').forEach(inp=>inp.oninput=()=>{const v=inp.value===''?null:Number(inp.value);if(v===null)delete d.counts[inp.dataset.id];else d.counts[inp.dataset.id]=v;save()});
@@ -58,7 +58,7 @@ function history(){
 // DATABASE
 function database(){
  document.body.classList.toggle('reorder',reorderMode);
- let h=`<div class="bar"><button id="addH">+ Add header</button><button id="reorderBtn" class="light sm reorderBtn${reorderMode?' on':''}" aria-pressed="${reorderMode}">${reorderMode?'Done':'Reorder'}</button><span style="flex:1"></span><span class="hsw muted">Header style: <button class="sm ${HS==='border'?'on':''}" data-hs="border">Border</button><button class="sm ${HS==='tint'?'on':''}" data-hs="tint">Tint</button></span></div>`;
+ let h=`<div class="bar"><button id="addH">+ Add header</button><button id="reorderBtn" class="light sm reorderBtn${reorderMode?' on':''}" aria-pressed="${reorderMode}">${reorderMode?'Done':'Reorder'}</button><span style="flex:1"></span><span class="hsw muted">Header style: <button class="sm ${hsOn('border')?'on':''}" data-hs="border" aria-pressed="${hsOn('border')}">Border</button><button class="sm ${hsOn('tint')?'on':''}" data-hs="tint" aria-pressed="${hsOn('tint')}">Tint</button></span></div>`;
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;
@@ -66,9 +66,9 @@ function database(){
    <button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
- q('.hsw button').forEach(b=>b.onclick=()=>{HS=b.dataset.hs;localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});
+ q('.hsw button').forEach(b=>b.onclick=()=>{const k=b.dataset.hs;const set=HS.split(' ').filter(x=>x&&x!==k);if(!hsOn(k))set.push(k);HS=set.sort().join(' ');localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});
  addH.onclick=()=>{const n=prompt('Header name (e.g. Coffee, Non-food):');if(n&&n.trim()){S.headers.push({id:uid(),name:n.trim(),items:[]});save();render()}};
- q('.addI').forEach(b=>b.onclick=()=>{const g=S.headers[b.dataset.g];const n=prompt(`New item under “${g.name}”:`);if(!n||!n.trim())return;const p=prompt('PAR (required stock level):','1');g.items.push({id:uid(),name:n.trim(),par:Math.max(0,Number(p)||0)});save();render()});
+ q('.addI').forEach(b=>b.onclick=()=>{const g=S.headers[b.dataset.g];const n=prompt(`New item under “${g.name}”:`);if(!n||!n.trim())return;const p=prompt('PAR (required stock level):','');g.items.push({id:uid(),name:n.trim(),par:Math.max(0,Number(p)||0)});save();render()});
  q('.hname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].name=e.value.trim()||'Untitled';save()});
  q('.iname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].items[e.dataset.i].name=e.value.trim()||'Untitled';save()});
  q('.ipar').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].items[e.dataset.i].par=Math.max(0,Number(e.value)||0);save()});

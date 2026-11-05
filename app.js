@@ -114,7 +114,9 @@ function bindSales(root,canOff){ // canOff: tapping the selected window turns sa
  root.querySelectorAll('.salesWin button').forEach(b=>b.onclick=()=>{localStorage.setItem(SALES_KEY,canOff&&b.dataset.sw===salesKind()?'off':b.dataset.sw);render()});
  root.querySelectorAll('input.salesEnd').forEach(i=>i.onchange=()=>{setSalesEnd(i.value);render()});
  root.querySelectorAll('[data-se]').forEach(b=>b.onclick=()=>{setSalesEnd(b.dataset.se==='sun'?lastSunday():today());render()})}
+const hasSales=()=>S.snapshots.length>=2; // fewer than 2 saved counts: nothing about sales anywhere (History or receipt)
 function salesHtml(){
+ if(!hasSales())return S.snapshots.length?`<h2 class="histHead histHead1">Saved counts</h2>`:'';
  const kind=salesKind();
  if(kind==='off')return`<section class="sales salesOff" aria-label="Sales (off)"><div class="bar salesBar"><b>Sales</b><span class="hsw salesWin">${salesWinBtns(kind)}</span></div></section><h2 class="histHead">Saved counts</h2>`;
  const r=computeSales(kind);
@@ -128,15 +130,24 @@ function salesHtml(){
 }
 // PRINT-FRIENDLY SALES VIEW (typewriter / receipt layout; @media print prints only .receipt)
 let preKind=null;
-function enterPrint(){printMode=true;preKind=salesKind();localStorage.setItem(SALES_KEY,'biweekly');reorderMode=false;document.body.classList.remove('reorder');render();window.scrollTo(0,0)}
+let pvOpts=false; // print view Options panel: collapsed every time the print view opens
+function enterPrint(){printMode=true;pvOpts=false;preKind=salesKind();localStorage.setItem(SALES_KEY,'biweekly');reorderMode=false;document.body.classList.remove('reorder');render();window.scrollTo(0,0)}
 function exitPrint(){printMode=false;if(preKind==='off')localStorage.setItem(SALES_KEY,'off');preKind=null; // History sales stay off if they were off
  render();window.scrollTo(0,0)}
-function orderReceiptHtml(){ // same list as the Order List tab (latest saved count, respects New count). No cost here.
+function orderMoney(L){ // receipt only: need x current Database cost; items without a cost are left out of the total
+ let total=0,missing=0;const groups=L.map(g=>{let sub=0,subN=0;const items=g.items.map(i=>{const c=costOf(g.name,i.name);if(c===null){missing++;return{...i,c:null,line:null}}const line=Math.round(i.need*c*100)/100;sub+=line;subN++;return{...i,c,line}});
+  sub=Math.round(sub*100)/100;total+=sub;return{name:g.name,items,sub,subN}});
+ return{groups,total:Math.round(total*100)/100,missing}}
+function orderReceiptHtml(){ // same list as the Order List tab (latest saved count, respects New count), plus cost on the receipt only
  const s=latest();let body;
  if(!s)body=`<p class="rEmpty">No saved count yet. Count on the Inventory tab, then tap Save count.</p>`;
  else if(S.ordersClearedAt&&S.ordersClearedAt>=s.savedAt)body=`<p class="rEmpty">New count started. The list fills in when you tap Save count.</p>`;
  else{const L=shortList(s.groups);
-  body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`+(L.length?L.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+g.items.map(i=>`<div class="rOLine"><span class="rName">${esc(i.name)}</span><span class="rDots"></span><span class="rNeed">${i.need}</span></div><div class="rCost"><span>have ${i.count} / par ${i.par}</span></div>`).join('')+`</div>`).join(''):`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`)}
+  if(!L.length)body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div><p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
+  else{const M=orderMoney(L);
+   body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`+M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+g.items.map(i=>`<div class="rOLine"><span class="rName">${esc(i.name)}</span><span class="rDots"></span><span class="rNeed">${i.need}</span></div><div class="rOInfo">have ${i.count} / par ${i.par}</div><div class="rOCost"><span class="rOEach">${i.need} @ ${i.c===null?'—':money(i.c)}</span><span class="rDots"></span><span class="rOTot">${i.line===null?'—':money(i.line)}</span></div>`).join('')
+    +(g.subN?`<div class="rOCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rOSub">${money(g.sub)}</span></div>`:'')+`</div>`).join('')
+    +`<div class="rRule"></div><div class="rLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
  return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rSales">To order</h2>${body}</section>`}
 function printView(){try{printViewInner()}catch(e){ // never leave a blank page: show what went wrong
  console.error(e);document.getElementById('printView').innerHTML=`<div class="pvCtl"><div class="pvBtns"><button type="button" class="light" id="pvBack">← Back</button></div></div><article class="receipt"><div class="rTitle">Sullivan Taylor Uptown</div><p class="rEmpty">Couldn’t build the print view: ${esc(e&&e.message||e)}</p></article>`;pvBack.onclick=exitPrint}}
@@ -147,18 +158,18 @@ function printViewInner(){
   +(g.subN?`<div class="rCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rSub">${money(g.sub)}</span></div>`:'')+`</div>`).join('')
   +`<div class="rRule"></div><div class="rLine rGrandLine"><span class="rName">TOTAL COST</span><span class="rDots"></span><span class="rGrand">${money(M.grand)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the total.</div>`:''}`}
  const now=new Date();
- P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print sales">Print…</button></div>
- <div class="bar salesBar pvSales">${salesControlsHtml(kind)}</div>
- <p class="muted pvHint">Pick the last day to include. Bi-weekly covers the 14 days ending that day, from the count on the start day to the count on the end day — pick a Sunday for Sunday-to-Sunday.</p></div>
+ P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print sales">Print…</button>${hasSales()?`<button type="button" class="light pvOptsBtn" id="pvOptsBtn" aria-expanded="${pvOpts}" aria-controls="pvOpts">Options <span class="pvCaret" aria-hidden="true">${pvOpts?'▾':'▸'}</span></button>`:''}</div>
+ <div id="pvOpts" class="pvOpts" ${pvOpts&&hasSales()?'':'hidden'}><div class="bar salesBar pvSales">${salesControlsHtml(kind)}</div>
+ <p class="muted pvHint">Pick the last day to include. Bi-weekly covers the 14 days ending that day, from the count on the start day to the count on the end day — pick a Sunday for Sunday-to-Sunday.</p></div></div>
  <article class="receipt" aria-label="Printable sales and order list">
- <div class="rTitle">Sullivan Taylor Uptown</div><h2 class="rSales">Sales</h2>
- <div class="rRange">${esc(rangeText(r))}</div><div class="rWin">${esc(SALES_WINDOWS[kind].label)} · ${r.days} days</div>
+ <div class="rTitle">Sullivan Taylor Uptown</div>
+ ${hasSales()?`<section class="rSalesSec" aria-label="Sales"><div class="rRange">${esc(rangeText(r))}</div><div class="rWin">${esc(SALES_WINDOWS[kind].label)} · ${r.days} days</div>
  <div class="rRule"></div><div class="rCols"><span>ITEM / QTY @ COST</span><span>SOLD / TOTAL</span></div><div class="rRule thin"></div>
  ${lines}
- <div class="rFoot rSalesFoot">Sold = drop between saved counts (restocks not counted). ${r.pairs} count ${r.pairs===1?'pair':'pairs'}.</div>
+ <div class="rFoot rSalesFoot">Sold = drop between saved counts (restocks not counted). ${r.pairs} count ${r.pairs===1?'pair':'pairs'}.</div></section>`:''}
  ${orderReceiptHtml()}
  <div class="rRule"></div><div class="rFoot">Printed ${esc(now.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}))} ${esc(now.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}))}</div></article>`;
- pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();bindSales(P)}
+ pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();const ob=document.getElementById('pvOptsBtn');if(ob)ob.onclick=()=>{pvOpts=!pvOpts;render()};bindSales(P)}
 function historyTab(){ // (not named "history": that would hide the browser's window.history)
  if(histSel){const s=S.snapshots.find(x=>x.id===histSel);
   V.innerHTML=`<div class="bar"><button class="light" id="back">← All counts</button><b style="flex:1">Count of ${s.date}</b><button class="danger sm" id="delSnap">Delete</button></div>
@@ -167,7 +178,7 @@ function historyTab(){ // (not named "history": that would hide the browser's wi
  let h=salesHtml();
  if(!S.snapshots.length)V.innerHTML=h+`<div class="card empty">No history yet.</div>`;
  else{V.innerHTML=h+[...S.snapshots].reverse().map(s=>{const n=shortList(s.groups).reduce((a,g)=>a+g.items.length,0);
-  return`<button class="hist" data-id="${s.id}"><span><b>${s.date}</b> <span class="muted">${fmt(s.savedAt)}</span></span><span>${n?`<span class="badge">${n} to order</span>`:'all good'}</span></button>`}).join('');
+  return`<button class="hist" data-id="${esc(s.id)}" aria-label="Open count of ${esc(s.date)}"><span><b>${s.date}</b> <span class="muted">${fmt(s.savedAt)}</span></span><span class="histR">${n?`<span class="badge">${n} to order</span>`:'all good'}<span class="histGo" aria-hidden="true">›</span></span></button>`}).join('');
   V.querySelectorAll('.hist').forEach(b=>b.onclick=()=>{histSel=b.dataset.id;render()})}
  bindSales(V,true);
 }

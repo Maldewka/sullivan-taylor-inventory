@@ -168,3 +168,14 @@ body.reorder .item label.icostL input{width:56px}
 .rOGroup{margin:0 0 8px}.rOLine{display:flex;align-items:baseline;gap:4px;padding-left:1ch}
 .rSalesFoot{margin-top:6px}
 .sales .cEach{font-size:.88rem;color:#5d4a3f;white-space:nowrap}.badge{white-space:nowrap}
+.rOInfo{padding-left:3ch;font-size:13px}
+.rOCost{display:flex;align-items:baseline;gap:4px;padding-left:3ch;font-size:13px}.rOTot,.rOSub{white-space:nowrap;text-align:right}
+.rOCost.rSubLine{padding-left:1ch}.rOrderTotal{font-weight:700;white-space:nowrap}
+.salesNote{margin:-4px 0 6px;font-size:.92rem}
+.hist{text-align:left}.histR{display:inline-flex;align-items:center;gap:8px;flex-shrink:0}.histGo{font-size:1.5rem;line-height:1;color:#8a5a3c;font-weight:700}
+/* print view: slim top row; options collapsed */
+.pvBtns{margin-bottom:0}.pvBtns button{min-height:42px}
+.pvOptsBtn{flex:0 0 auto!important;font-weight:600;padding:0 12px}.pvCaret{margin-left:4px}
+.pvOpts{margin-top:10px}.pvOpts[hidden]{display:none}
+.pvCtl{padding-bottom:8px;margin-bottom:12px}
+.histHead1{margin-top:2px}

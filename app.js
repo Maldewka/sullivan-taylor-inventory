@@ -12,7 +12,7 @@ const fmt=d=>new Date(d).toLocaleString(undefined,{weekday:'short',month:'short'
 S=load();
 const V=document.getElementById('view');
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.tab!==tab)reorderMode=false;tab=b.dataset.tab;histSel=null;render()});
-let printMode=false; // on-screen print-friendly sales view (not persisted)
+let printMode=false; // on-screen print-friendly view (not persisted)
 function render(){document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
 // snapshot helpers
 function freeze(counts,skipped={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>skipped[i.id]?{name:i.name,par:i.par,count:null,skipped:true}:{name:i.name,par:i.par,count:counts[i.id]??null})}))}
@@ -47,140 +47,109 @@ function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
 function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?'<span class="muted">Not counted</span>':`<b>${i.count}</b>`}</div>`}).join('')+`</div>`).join('')}
-// COST (what the shop paid per unit; Database only, used by Sales + receipt, never on Order List/Inventory)
+// COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
 const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
 function parseCost(v){v=String(v).trim().replace(/[$,\s]/g,'');if(v==='')return null;const n=Number(v);return isFinite(n)&&n>=0?Math.round(n*100)/100:NaN}
 function costOf(hn,n){for(const h of S.headers)if(h.name===hn)for(const i of h.items)if(i.name===n&&hasCost(i))return i.cost;return null} // current Database cost, matched by header + item name
-// HISTORY
-const SALES_KEY='coffeeInventory.salesWindow';
-const SALES_WINDOWS={weekly:{days:7,label:'Weekly'},biweekly:{days:14,label:'Bi-weekly'},monthly:{days:30,label:'Monthly'},quarterly:{days:90,label:'Quarterly'}};
-function salesKind(){const v=localStorage.getItem(SALES_KEY);return v==='off'?'off':SALES_WINDOWS[v]?v:'weekly'} // 'off' = sales hidden on History (toggle-off); no saved choice = Weekly
+// HISTORY: OVERHEAD = what was spent on orders. For each saved count dated in the window, order cost = Σ need × current cost
+// (need = the same rounded-up shortfall that count's order list shows). Counts outside the window add nothing; each count once.
+const OH_KEY='coffeeInventory.overheadWindow',OH_END_KEY='coffeeInventory.overheadEnd',PRINT_KIND_KEY='coffeeInventory.printKind';
+(()=>{for(const[o,n]of[['coffeeInventory.salesWindow',OH_KEY],['coffeeInventory.salesEnd',OH_END_KEY]]){const v=localStorage.getItem(o);if(v!==null){if(localStorage.getItem(n)===null)localStorage.setItem(n,v);localStorage.removeItem(o)}}})(); // migrate old keys
+const OH_WINDOWS={weekly:{days:7,label:'Weekly'},biweekly:{days:14,label:'Bi-weekly'},monthly:{days:30,label:'Monthly'},quarterly:{days:90,label:'Quarterly'}};
+function ohKind(){const v=localStorage.getItem(OH_KEY);return v==='off'?'off':OH_WINDOWS[v]?v:'weekly'} // 'off' = report hidden (toggle-off); no saved choice = Weekly
 function isoLocal(d){return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
-const SALES_END_KEY='coffeeInventory.salesEnd';
-function salesEnd(){const v=localStorage.getItem(SALES_END_KEY);return /^\d{4}-\d{2}-\d{2}$/.test(v||'')&&!isNaN(new Date(v+'T12:00:00'))?v:today()}
-function setSalesEnd(v){if(/^\d{4}-\d{2}-\d{2}$/.test(v||''))localStorage.setItem(SALES_END_KEY,v);else localStorage.removeItem(SALES_END_KEY)}
+function ohEnd(){const v=localStorage.getItem(OH_END_KEY);return /^\d{4}-\d{2}-\d{2}$/.test(v||'')&&!isNaN(new Date(v+'T12:00:00'))?v:today()}
+function setOhEnd(v){if(/^\d{4}-\d{2}-\d{2}$/.test(v||''))localStorage.setItem(OH_END_KEY,v);else localStorage.removeItem(OH_END_KEY)}
 const dayOf=iso=>new Date(iso+'T12:00:00');
 const addDays=(iso,n)=>{const d=dayOf(iso);d.setDate(d.getDate()+n);return isoLocal(d)};
 function lastSunday(){const t=today();return addDays(t,-dayOf(t).getDay())} // today if today is Sunday
-function windowRange(kind){
- // N days ending on the picked end day (default today). Counts dated start..end (= after the "from" day) are the
- // later side of a pair, so sales run from the count on the "from" day to the count on the end day.
- // Pick a Sunday with Bi-weekly => Sunday-to-Sunday, two weeks.
- const days=SALES_WINDOWS[kind].days;const end=salesEnd();
- return{start:addDays(end,-(days-1)),end,from:addDays(end,-days),days}}
-function fmtShort(iso){return dayOf(iso).toLocaleDateString(undefined,{month:'short',day:'numeric'})}
+function windowRange(kind){const days=OH_WINDOWS[kind].days;const end=ohEnd();return{start:addDays(end,-(days-1)),end,days}} // N days ending on the picked day
 function fmtDay(iso,yr){return dayOf(iso).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',...(yr?{year:'numeric'}:{})})}
-function rangeText(r){const y=r.from.slice(0,4)!==r.end.slice(0,4)||r.end.slice(0,4)!==today().slice(0,4);
- return`${fmtDay(r.from,y)} – ${fmtDay(r.end,y)}`}
-function windowText(kind,r){return r.end===today()?`Last ${r.days} days`:`${SALES_WINDOWS[kind].label} (${r.days} days)`}
-function computeSales(kind){
- // Sold = drop between consecutive dated snapshots, attributed to the later date.
- // Interval included when later.date is inside [start, end] (rolling window ending today).
- // Match items by header name + item name. Skip skipped/null. Ignore negative (restock).
- const{start,end,days}=windowRange(kind);
- const snaps=[...S.snapshots].filter(s=>s&&s.date).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.savedAt<b.savedAt?-1:1);
- const totals={};let pairs=0;
- for(let i=1;i<snaps.length;i++){
-  const earlier=snaps[i-1],later=snaps[i];
-  if(later.date<start||later.date>end)continue;
-  pairs++;
-  const em={};for(const g of earlier.groups||[])for(const it of g.items||[])em[g.name+'\0'+it.name]=it;
-  for(const g of later.groups||[])for(const it of g.items||[]){
-   const prev=em[g.name+'\0'+it.name];if(!prev)continue;
-   if(prev.skipped||it.skipped)continue;
-   if(typeof prev.count!=='number'||typeof it.count!=='number')continue;
-   const sold=+(prev.count-it.count).toFixed(6);if(!(sold>0))continue;
-   (totals[g.name]||(totals[g.name]={}))[it.name]=+(((totals[g.name]&&totals[g.name][it.name])||0)+sold).toFixed(6);
-  }
- }
- return{start,end,from:addDays(end,-days),days,pairs,totals}
-}
-function salesUsed(r){const order=[...S.headers.map(h=>h.name)];for(const n of Object.keys(r.totals))if(!order.includes(n))order.push(n);
- return order.filter(n=>r.totals[n]&&Object.keys(r.totals[n]).length).map(hn=>[hn,Object.entries(r.totals[hn]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]))])}
-function salesMoney(used){ // per line: [name, sold, cost|null, line|null]; subtotal per category; grand total of costed lines only
- let grand=0,missing=0;const groups=used.map(([hn,items])=>{let sub=0,subN=0;const rows=items.map(([n,q])=>{const c=costOf(hn,n);if(c===null){missing++;return[n,q,null,null]}const t=Math.round(q*c*100)/100;sub+=t;subN++;return[n,q,c,t]});
-  sub=Math.round(sub*100)/100;grand+=sub;return{hn,rows,sub,subN}});
- return{groups,grand:Math.round(grand*100)/100,missing}}
-function salesEmpty(r){if(S.snapshots.length<2)return'Need at least two saved counts to see sales and their cost. The drop between one count and the next is what sold.';
- if(r.pairs===0)return'No count pairs fall in this window yet. Try a longer window or another end date, or save another count.';
- if(!salesUsed(r).length)return'Nothing sold in this window — counts didn’t drop between saves.';return''}
-function salesWinBtns(kind){return Object.entries(SALES_WINDOWS).map(([k,v])=>`<button type="button" class="sm ${k===kind?'on':''}" data-sw="${k}" aria-pressed="${k===kind}">${v.label}</button>`).join('')}
-function salesControlsHtml(kind){ // shared by History > Sales and the print view
- const btns=Object.entries(SALES_WINDOWS).map(([k,v])=>`<button type="button" class="sm ${k===kind?'on':''}" data-sw="${k}" aria-pressed="${k===kind}">${v.label}</button>`).join('');
- const e=salesEnd();
- return`<span class="hsw salesWin">${btns}</span><span class="salesEndBox"><label class="salesEndLbl">Ending <input type="date" class="salesEnd" value="${e}" max="${today()}" aria-label="Sales end date"></label><button type="button" class="light sm" data-se="sun">Last Sunday</button><button type="button" class="light sm" data-se="today">Today</button></span>`}
-function bindSales(root,canOff){ // canOff: tapping the selected window turns sales off (History only, not the print view)
- root.querySelectorAll('.salesWin button').forEach(b=>b.onclick=()=>{localStorage.setItem(SALES_KEY,canOff&&b.dataset.sw===salesKind()?'off':b.dataset.sw);render()});
- root.querySelectorAll('input.salesEnd').forEach(i=>i.onchange=()=>{setSalesEnd(i.value);render()});
- root.querySelectorAll('[data-se]').forEach(b=>b.onclick=()=>{setSalesEnd(b.dataset.se==='sun'?lastSunday():today());render()})}
-const hasSales=()=>S.snapshots.length>=2; // fewer than 2 saved counts: nothing about sales anywhere (History or receipt)
-function salesHtml(){
- if(!hasSales())return S.snapshots.length?`<h2 class="histHead histHead1">Saved counts</h2>`:'';
- const kind=salesKind();
- if(kind==='off')return`<section class="sales salesOff" aria-label="Sales (off)"><div class="bar salesBar"><b>Sales</b><span class="hsw salesWin">${salesWinBtns(kind)}</span></div></section><h2 class="histHead">Saved counts</h2>`;
- const r=computeSales(kind);
- const range=`${windowText(kind,r)} · ${rangeText(r)}`;
- const msg=salesEmpty(r);
- let body;if(msg)body=`<div class="card empty">${esc(msg)}</div>`;else{const M=salesMoney(salesUsed(r));
- body=M.groups.map(g=>`<div class="card"><h3 class="ghead">${esc(g.hn)}</h3>`+g.rows.map(([n,q,c,t])=>`<div class="item"><div class="name">${esc(n)}</div><span class="sold">Sold ${q}</span><span class="costInfo"><span class="muted cEach">${c===null?'no cost':money(c)+' ea'}</span><b class="cLine">${t===null?'—':money(t)}</b></span></div>`).join('')
-  +(g.subN?`<div class="item subTot"><div class="name muted">Subtotal</div><b class="cSub">${money(g.sub)}</b></div>`:'')+`</div>`).join('')
-  +`<div class="card grandTot"><div class="item"><div class="name"><b>Total cost of items sold</b></div><b class="cGrand">${money(M.grand)}</b></div>${M.missing?`<p class="muted costNote">${M.missing} item${M.missing===1?'':'s'} without a cost ${M.missing===1?"isn't":"aren't"} in the total. Add costs in the <b>Database</b> tab.</p>`:''}</div>`}
- return`<section class="sales" aria-label="Sales"><div class="bar salesBar"><b>Sales</b>${salesControlsHtml(kind)}</div><p class="muted salesRange">${esc(range)}</p>${body}</section><h2 class="histHead">Saved counts</h2>`
-}
-// PRINT-FRIENDLY SALES VIEW (typewriter / receipt layout; @media print prints only .receipt)
-let preKind=null;
-let pvOpts=false; // print view Options panel: collapsed every time the print view opens
-function enterPrint(){printMode=true;pvOpts=false;preKind=salesKind();localStorage.setItem(SALES_KEY,'biweekly');reorderMode=false;document.body.classList.remove('reorder');render();window.scrollTo(0,0)}
-function exitPrint(){printMode=false;if(preKind==='off')localStorage.setItem(SALES_KEY,'off');preKind=null; // History sales stay off if they were off
- render();window.scrollTo(0,0)}
-function orderMoney(L){ // receipt only: need x current Database cost; items without a cost are left out of the total
- let total=0,missing=0;const groups=L.map(g=>{let sub=0,subN=0;const items=g.items.map(i=>{const c=costOf(g.name,i.name);if(c===null){missing++;return{...i,c:null,line:null}}const line=Math.round(i.need*c*100)/100;sub+=line;subN++;return{...i,c,line}});
+function rangeText(r){const y=r.start.slice(0,4)!==r.end.slice(0,4)||r.end.slice(0,4)!==today().slice(0,4);return`${fmtDay(r.start,y)} – ${fmtDay(r.end,y)}`}
+function windowText(kind,r){return r.end===today()?`Last ${r.days} days`:`${OH_WINDOWS[kind].label} (${r.days} days)`}
+function costGroups(groups){ // [{name,items:[{name,qty,...}]}] -> adds c (current cost|null) and line per item; subtotals; total of costed lines only
+ let total=0,missing=0;const out=groups.map(g=>{let sub=0,subN=0;const items=g.items.map(i=>{const c=costOf(g.name,i.name);if(c===null){missing++;return{...i,c:null,line:null}}const line=Math.round(i.qty*c*100)/100;sub+=line;subN++;return{...i,c,line}});
   sub=Math.round(sub*100)/100;total+=sub;return{name:g.name,items,sub,subN}});
- return{groups,total:Math.round(total*100)/100,missing}}
-function orderReceiptHtml(){ // same list as the Order List tab (latest saved count, respects New count), plus cost on the receipt only
- const s=latest();let body;
+ return{groups:out,total:Math.round(total*100)/100,missing}}
+function computeOverhead(kind){
+ const r=windowRange(kind);const tot={};let counts=0;
+ for(const s of S.snapshots){if(!s||!s.date||s.date<r.start||s.date>r.end)continue;counts++;
+  for(const g of shortList(s.groups||[]))for(const i of g.items){const m=tot[g.name]||(tot[g.name]={});m[i.name]=(m[i.name]||0)+i.need}}
+ const order=[...S.headers.map(h=>h.name)];for(const n of Object.keys(tot))if(!order.includes(n))order.push(n);
+ const groups=order.filter(n=>tot[n]).map(n=>({name:n,items:Object.entries(tot[n]).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])).map(([name,qty])=>({name,qty}))}));
+ return{...r,counts,...costGroups(groups)}}
+function ohEmpty(o){if(!S.snapshots.length)return'No saved count yet.';if(!o.counts)return'No saved counts in this window. Try a longer window or another end date.';if(!o.groups.length)return'Nothing was ordered in this window — every count was at or above par.';return''}
+function ohWinBtns(kind){return Object.entries(OH_WINDOWS).map(([k,v])=>`<button type="button" class="sm ${k===kind?'on':''}" data-ow="${k}" aria-pressed="${k===kind}">${v.label}</button>`).join('')}
+function ohControlsHtml(kind){return`<span class="hsw ohWin">${ohWinBtns(kind)}</span><span class="ohEndBox"><label class="ohEndLbl">Ending <input type="date" class="ohEnd" value="${ohEnd()}" max="${today()}" aria-label="Overhead end date"></label><button type="button" class="light sm" data-oe="sun">Last Sunday</button><button type="button" class="light sm" data-oe="today">Today</button></span>`}
+function bindOh(root,canOff){ // canOff: tapping the selected window hides the report (History only, not the print view)
+ root.querySelectorAll('.ohWin button').forEach(b=>b.onclick=()=>{localStorage.setItem(OH_KEY,canOff&&b.dataset.ow===ohKind()?'off':b.dataset.ow);render()});
+ root.querySelectorAll('input.ohEnd').forEach(i=>i.onchange=()=>{setOhEnd(i.value);render()});
+ root.querySelectorAll('[data-oe]').forEach(b=>b.onclick=()=>{setOhEnd(b.dataset.oe==='sun'?lastSunday():today());render()})}
+function overheadHtml(){
+ if(!S.snapshots.length)return'';
+ const kind=ohKind();
+ if(kind==='off')return`<section class="overhead ohOff" aria-label="Overhead (off)"><div class="bar ohBar"><b>Overhead</b><span class="hsw ohWin">${ohWinBtns(kind)}</span></div></section><h2 class="histHead">Saved counts</h2>`;
+ const o=computeOverhead(kind);const msg=ohEmpty(o);
+ const body=msg?`<div class="card empty">${esc(msg)}</div>`:o.groups.map(g=>`<div class="card"><h3 class="ghead">${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}</div><span class="ohQty">${i.qty} @ ${i.c===null?'—':money(i.c)}</span><b class="ohLine">${i.line===null?'—':money(i.line)}</b></div>`).join('')
+  +(g.subN?`<div class="item ohSubRow"><div class="name muted">Subtotal</div><b class="ohSub">${money(g.sub)}</b></div>`:'')+`</div>`).join('')
+  +`<div class="card ohTotalCard"><div class="item"><div class="name"><b>Overhead total</b></div><b class="ohTotal">${money(o.total)}</b></div>${o.missing?`<p class="muted ohNote">${o.missing} item${o.missing===1?'':'s'} without a cost ${o.missing===1?"isn't":"aren't"} in the total. Add costs in the <b>Database</b> tab.</p>`:''}<p class="muted ohHow">Order cost of the ${o.counts} saved count${o.counts===1?'':'s'} in this window.</p></div>`;
+ return`<section class="overhead" aria-label="Overhead"><div class="bar ohBar"><b>Overhead</b>${ohControlsHtml(kind)}<button type="button" class="light sm ohPrint" id="ohPrint" aria-label="Print overhead">Print overhead</button></div><p class="muted ohRange">${esc(windowText(kind,o)+' · '+rangeText(o))}</p>${body}</section><h2 class="histHead">Saved counts</h2>`}
+// PRINT VIEW (typewriter / receipt; @media print prints only .receipt). Two independent prints: To order | Overhead (timeframe).
+let pvOpts=false,pvSnap=null; // Options panel collapsed on every open; pvSnap = saved count to print (null = latest)
+function printKind(){return localStorage.getItem(PRINT_KIND_KEY)==='overhead'?'overhead':'order'} // remembered; default To order
+function enterPrint(k){printMode=true;pvOpts=false;pvSnap=null;if(k)localStorage.setItem(PRINT_KIND_KEY,k);reorderMode=false;document.body.classList.remove('reorder');render();window.scrollTo(0,0)}
+function exitPrint(){printMode=false;render();window.scrollTo(0,0)}
+const rLines=(g,extra)=>g.items.map(i=>`<div class="rOLine"><span class="rName">${esc(i.name)}</span><span class="rDots"></span><span class="rNeed">${i.qty}</span></div>${extra?extra(i):''}<div class="rOCost"><span class="rOEach">${i.qty} @ ${i.c===null?'—':money(i.c)}</span><span class="rDots"></span><span class="rOTot">${i.line===null?'—':money(i.line)}</span></div>`).join('');
+const rSub=g=>g.subN?`<div class="rOCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rOSub">${money(g.sub)}</span></div>`:'';
+function printSnap(){return(pvSnap&&S.snapshots.find(x=>x.id===pvSnap))||latest()}
+function orderReceiptHtml(){ // To order print: one saved count's order list (default latest) with cost on the receipt only
+ const s=printSnap();let body;
  if(!s)body=`<p class="rEmpty">No saved count yet. Count on the Inventory tab, then tap Save count.</p>`;
- else if(S.ordersClearedAt&&S.ordersClearedAt>=s.savedAt)body=`<p class="rEmpty">New count started. The list fills in when you tap Save count.</p>`;
- else{const L=shortList(s.groups);
-  if(!L.length)body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div><p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
-  else{const M=orderMoney(L);
-   body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`+M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+g.items.map(i=>`<div class="rOLine"><span class="rName">${esc(i.name)}</span><span class="rDots"></span><span class="rNeed">${i.need}</span></div><div class="rOInfo">have ${i.count} / par ${i.par}</div><div class="rOCost"><span class="rOEach">${i.need} @ ${i.c===null?'—':money(i.c)}</span><span class="rDots"></span><span class="rOTot">${i.line===null?'—':money(i.line)}</span></div>`).join('')
-    +(g.subN?`<div class="rOCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rOSub">${money(g.sub)}</span></div>`:'')+`</div>`).join('')
-    +`<div class="rRule"></div><div class="rLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
- return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rSales">To order</h2>${body}</section>`}
+ else{const L=shortList(s.groups).map(g=>({name:g.name,items:g.items.map(i=>({...i,qty:i.need}))}));
+  body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`;
+  if(!L.length)body+=`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
+  else{const M=costGroups(L);
+   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.count} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
+    +`<div class="rRule"></div><div class="rOLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
+ return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rHeading">To order</h2>${body}</section>`}
+function overheadReceiptHtml(){ // Overhead print: the History Overhead report for the chosen window + end date
+ const kind=ohKind()==='off'?'weekly':ohKind();const o=computeOverhead(kind);const msg=ohEmpty(o);
+ const body=msg?`<p class="rEmpty">${esc(msg)}</p>`:o.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g)+rSub(g)+`</div>`).join('')
+  +`<div class="rRule"></div><div class="rOLine rGrandLine"><span class="rName">OVERHEAD TOTAL</span><span class="rDots"></span><span class="rOhTotal">${money(o.total)}</span></div>${o.missing?`<div class="rNote">* Items without a cost (—) aren't in the overhead total.</div>`:''}`;
+ return`<section class="rOh" aria-label="Overhead"><div class="rRule"></div><h2 class="rHeading">Overhead</h2><div class="rRange">${esc(rangeText(o))}</div><div class="rWin">${esc(OH_WINDOWS[kind].label)} · ${o.days} days</div><div class="rRule thin"></div>${body}${msg?'':`<div class="rFoot rOhFoot">Order cost of ${o.counts} saved count${o.counts===1?'':'s'} in this range.</div>`}</section>`}
 function printView(){try{printViewInner()}catch(e){ // never leave a blank page: show what went wrong
  console.error(e);document.getElementById('printView').innerHTML=`<div class="pvCtl"><div class="pvBtns"><button type="button" class="light" id="pvBack">← Back</button></div></div><article class="receipt"><div class="rTitle">Sullivan Taylor Uptown</div><p class="rEmpty">Couldn’t build the print view: ${esc(e&&e.message||e)}</p></article>`;pvBack.onclick=exitPrint}}
 function printViewInner(){
- const P=document.getElementById('printView');const kind=salesKind();const r=computeSales(kind);const msg=salesEmpty(r);
- let lines;if(msg)lines=`<p class="rEmpty">${esc(msg)}</p>`;else{const M=salesMoney(salesUsed(r));
- lines=M.groups.map(g=>`<div class="rGroup"><div class="rHead">${esc(g.hn)}</div>`+g.rows.map(([n,q,c,t])=>`<div class="rLine"><span class="rName">${esc(n)}</span><span class="rDots"></span><span class="rQty">${q}</span></div><div class="rCost"><span class="rEach">${q} @ ${c===null?'—':money(c)}</span><span class="rDots"></span><span class="rTot">${t===null?'—':money(t)}</span></div>`).join('')
-  +(g.subN?`<div class="rCost rSubLine"><span>Subtotal</span><span class="rDots"></span><span class="rSub">${money(g.sub)}</span></div>`:'')+`</div>`).join('')
-  +`<div class="rRule"></div><div class="rLine rGrandLine"><span class="rName">TOTAL COST</span><span class="rDots"></span><span class="rGrand">${money(M.grand)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the total.</div>`:''}`}
+ const P=document.getElementById('printView');const pk=printKind();
+ const hasOpts=pk==='overhead'?S.snapshots.length>0:S.snapshots.length>1;
+ const sel=printSnap();
+ const opts=pk==='overhead'?`<div class="bar ohBar pvOh">${ohControlsHtml(ohKind()==='off'?'weekly':ohKind())}</div>`
+  :`<label class="pvSnapLbl">Count to print <select id="pvSnapSel" aria-label="Saved count to print">${[...S.snapshots].reverse().map(s=>`<option value="${esc(s.id)}" ${sel&&s.id===sel.id?'selected':''}>${esc(fmtDay(s.date,true))}</option>`).join('')}</select></label>`;
  const now=new Date();
- P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print sales">Print…</button>${hasSales()?`<button type="button" class="light pvOptsBtn" id="pvOptsBtn" aria-expanded="${pvOpts}" aria-controls="pvOpts">Options <span class="pvCaret" aria-hidden="true">${pvOpts?'▾':'▸'}</span></button>`:''}</div>
- <div id="pvOpts" class="pvOpts" ${pvOpts&&hasSales()?'':'hidden'}><div class="bar salesBar pvSales">${salesControlsHtml(kind)}</div>
- <p class="muted pvHint">Pick the last day to include. Bi-weekly covers the 14 days ending that day, from the count on the start day to the count on the end day — pick a Sunday for Sunday-to-Sunday.</p></div></div>
- <article class="receipt" aria-label="Printable sales and order list">
+ P.innerHTML=`<div class="pvCtl noprint"><div class="pvBtns"><button type="button" class="light" id="pvBack" aria-label="Exit print view">← Back</button><button type="button" id="pvPrint" aria-label="Print">Print…</button>${hasOpts?`<button type="button" class="light pvOptsBtn" id="pvOptsBtn" aria-expanded="${pvOpts}" aria-controls="pvOpts">Options <span class="pvCaret" aria-hidden="true">${pvOpts?'▾':'▸'}</span></button>`:''}</div>
+ <div class="pvKind" role="radiogroup" aria-label="What to print"><button type="button" role="radio" data-pk="order" aria-checked="${pk==='order'}" class="${pk==='order'?'on':''}">To order</button><button type="button" role="radio" data-pk="overhead" aria-checked="${pk==='overhead'}" class="${pk==='overhead'?'on':''}">Overhead (timeframe)</button></div>
+ ${hasOpts?`<div id="pvOpts" class="pvOpts" ${pvOpts?'':'hidden'}>${opts}</div>`:''}</div>
+ <article class="receipt" data-kind="${pk}" aria-label="${pk==='order'?'Printable order list':'Printable overhead'}">
  <div class="rTitle">Sullivan Taylor Uptown</div>
- ${hasSales()?`<section class="rSalesSec" aria-label="Sales"><div class="rRange">${esc(rangeText(r))}</div><div class="rWin">${esc(SALES_WINDOWS[kind].label)} · ${r.days} days</div>
- <div class="rRule"></div><div class="rCols"><span>ITEM / QTY @ COST</span><span>SOLD / TOTAL</span></div><div class="rRule thin"></div>
- ${lines}
- <div class="rFoot rSalesFoot">Sold = drop between saved counts (restocks not counted). ${r.pairs} count ${r.pairs===1?'pair':'pairs'}.</div></section>`:''}
- ${orderReceiptHtml()}
+ ${pk==='order'?orderReceiptHtml():overheadReceiptHtml()}
  <div class="rRule"></div><div class="rFoot">Printed ${esc(now.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}))} ${esc(now.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}))}</div></article>`;
- pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();const ob=document.getElementById('pvOptsBtn');if(ob)ob.onclick=()=>{pvOpts=!pvOpts;render()};bindSales(P)}
+ pvBack.onclick=exitPrint;pvPrint.onclick=()=>window.print();
+ const ob=document.getElementById('pvOptsBtn');if(ob)ob.onclick=()=>{pvOpts=!pvOpts;render()};
+ P.querySelectorAll('[data-pk]').forEach(b=>b.onclick=()=>{if(b.dataset.pk!==pk){localStorage.setItem(PRINT_KIND_KEY,b.dataset.pk);pvOpts=false;render()}});
+ const ss=document.getElementById('pvSnapSel');if(ss)ss.onchange=()=>{pvSnap=ss.value;render()};
+ bindOh(P,false)}
 function historyTab(){ // (not named "history": that would hide the browser's window.history)
  if(histSel){const s=S.snapshots.find(x=>x.id===histSel);
   V.innerHTML=`<div class="bar"><button class="light" id="back">← All counts</button><b style="flex:1">Count of ${s.date}</b><button class="danger sm" id="delSnap">Delete</button></div>
   <div class="split"><section><h2>Count</h2>${countHtml(s)}</section><section><h2>Order list</h2>${orderHtml(s)}</section></div>`;
   back.onclick=()=>{histSel=null;render()};delSnap.onclick=()=>{if(confirm('Delete this count from history?')){S.snapshots=S.snapshots.filter(x=>x.id!==s.id);save();histSel=null;render()}};return}
- let h=salesHtml();
+ let h=overheadHtml();
  if(!S.snapshots.length)V.innerHTML=h+`<div class="card empty">No history yet.</div>`;
  else{V.innerHTML=h+[...S.snapshots].reverse().map(s=>{const n=shortList(s.groups).reduce((a,g)=>a+g.items.length,0);
   return`<button class="hist" data-id="${esc(s.id)}" aria-label="Open count of ${esc(s.date)}"><span><b>${s.date}</b> <span class="muted">${fmt(s.savedAt)}</span></span><span class="histR">${n?`<span class="badge">${n} to order</span>`:'all good'}<span class="histGo" aria-hidden="true">›</span></span></button>`}).join('');
   V.querySelectorAll('.hist').forEach(b=>b.onclick=()=>{histSel=b.dataset.id;render()})}
- bindSales(V,true);
+ bindOh(V,true);const op=document.getElementById('ohPrint');if(op)op.onclick=()=>enterPrint('overhead');
 }
 // DATABASE
 function database(){
@@ -209,9 +178,7 @@ function database(){
  q('.delH').forEach(b=>b.onclick=()=>{const g=S.headers[b.dataset.g];if(confirm(`Delete header “${g.name}” and its ${g.items.length} item(s)?`)){S.headers.splice(b.dataset.g,1);save();render()}});
  q('.delI').forEach(b=>b.onclick=()=>{const a=S.headers[b.dataset.g].items;if(confirm(`Delete “${a[b.dataset.i].name}”?`)){a.splice(b.dataset.i,1);save();render()}});
 }
-// export/import
+// header buttons
 printBtn.onclick=()=>printMode?exitPrint():enterPrint();
 logoutBtn.addEventListener('click',()=>{printMode=false;document.body.classList.remove('printView')});
-exportBtn.onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));a.download=`coffee-inventory-${today()}.json`;a.click()};
-importFile.onchange=async()=>{const f=importFile.files[0];if(!f)return;try{const d=JSON.parse(await f.text());delete d.auth;if(!Array.isArray(d.headers)||!Array.isArray(d.snapshots))throw 0;if(confirm('Replace all current data with this backup?')){S=d;save();render()}}catch{alert('That file is not a valid backup.')}importFile.value=''};
 // initial render is done by auth.js after sign-in

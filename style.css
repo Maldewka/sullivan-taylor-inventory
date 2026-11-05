@@ -90,3 +90,7 @@ input.rcode:focus{outline:3px solid #8a5a3c;outline-offset:1px}
 }
 .lastSaved{flex-basis:100%}
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#3b2a20;color:#fff;padding:10px 16px;border-radius:10px;max-width:90vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .2s;z-index:50}#toast.show{opacity:1}
+/* sync status: tiny line under the title, absolutely placed so the header doesn't grow */
+.top{position:relative}.syncst{position:absolute;left:16px;bottom:2px;font-size:.66rem;line-height:1;color:rgba(255,255,255,.72);pointer-events:none;white-space:nowrap}
+.syncst[data-s=offline],.syncst[data-s=local],.syncst[data-s=error]{color:#ffd9a8}
+@media(max-width:480px){.syncst{left:14px}}@media(max-width:370px){.syncst{left:10px}}

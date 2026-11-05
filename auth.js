@@ -1,86 +1,111 @@
-// Local-device login gate. Stores only a PBKDF2-SHA256 salted hash in localStorage.
-const AUTH_KEY='coffeeInventory.auth', SESSION_KEY='coffeeInventory.session';
-const USERNAME='STHouse', MIN_PW=6, ITER=200000;
-const SESSION_STORE=sessionStorage; // signed in until the tab/browser closes
+// Sign-in with Supabase Auth (email + password). One shared shop account is the expected use.
+// The session is kept by supabase-js in this browser's localStorage, so the app stays signed in
+// (and can open offline) until someone taps Log out. Passwords are never stored by this app.
+const MIN_PW=6; // Supabase's default minimum; keep in step with Authentication -> Providers -> Email.
 const A=document.getElementById('auth'),APP=document.getElementById('app');
-let fails=0,lockUntil=0,authMode=null;
-const b64=u=>btoa(String.fromCharCode(...new Uint8Array(u)));
-const unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-const getAuth=()=>{try{return JSON.parse(localStorage.getItem(AUTH_KEY))}catch{return null}};
-async function derive(pw,salt,iter){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveBits']);
- return b64(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations:iter},k,256))}
-const RC_ALPHA='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 chars, no 0/O/1/I
-const normCode=c=>String(c).toUpperCase().replace(/[\s-]/g,'');
-function genCode(){const r=crypto.getRandomValues(new Uint8Array(12));const c=[...r].map(x=>RC_ALPHA[x&31]).join('');return c.slice(0,4)+'-'+c.slice(4,8)+'-'+c.slice(8)}
-async function setPassword(pw){const old=getAuth()||{};const salt=crypto.getRandomValues(new Uint8Array(16));
- const rec={user:USERNAME,salt:b64(salt),hash:await derive(pw,salt,ITER),iter:ITER,alg:'PBKDF2-SHA256',rsalt:old.rsalt,rhash:old.rhash};localStorage.setItem(AUTH_KEY,JSON.stringify(rec));return rec}
-async function newRecovery(){const a=getAuth();const code=genCode();const rs=crypto.getRandomValues(new Uint8Array(16));
- a.rsalt=b64(rs);a.rhash=await derive(normCode(code),rs,a.iter);localStorage.setItem(AUTH_KEY,JSON.stringify(a));return code}
-const same=(x,y)=>{let d=x.length^y.length;for(let i=0;i<x.length;i++)d|=x.charCodeAt(i)^(y.charCodeAt(i)||0);return d===0};
-async function verify(user,pw){const a=getAuth();if(!a||user.trim()!==a.user)return false;return same(await derive(pw,unb64(a.salt),a.iter),a.hash)}
-async function verifyRecovery(user,code){const a=getAuth();if(!a||!a.rhash||user.trim()!==a.user)return false;return same(await derive(normCode(code),unb64(a.rsalt),a.iter),a.rhash)}
-const signedIn=()=>{const a=getAuth();return !!a&&SESSION_STORE.getItem(SESSION_KEY)===a.hash};
-function unlock(){SESSION_STORE.setItem(SESSION_KEY,getAuth().hash);A.hidden=true;A.innerHTML='';APP.hidden=false;S=load();tab='inventory';histSel=null;render()}
-function lock(){SESSION_STORE.removeItem(SESSION_KEY);APP.hidden=true;V.innerHTML='';showAuth()}
+const LAST_EMAIL='coffeeInventory.lastEmail';
+const SB_URL=String(window.SUPABASE_URL||''),SB_KEY=String(window.SUPABASE_ANON_KEY||'');
+const CONFIGURED=/^https:\/\/[^\s]+$/.test(SB_URL)&&!/PASTE|YOUR/i.test(SB_URL+SB_KEY)&&SB_KEY.length>20;
+const APP_URL=window.APP_URL||location.href.split('#')[0].split('?')[0];
+// Look at the link before supabase-js reads (and clears) it: password reset links say type=recovery.
+const LINK=new URLSearchParams(location.hash.slice(1)),QS=new URLSearchParams(location.search);
+let recovering=LINK.get('type')==='recovery';
+let linkError=LINK.get('error_description')||QS.get('error_description')||'';
+if(linkError&&history.replaceState)history.replaceState(null,'',location.pathname);
+localStorage.removeItem('coffeeInventory.auth');sessionStorage.removeItem('coffeeInventory.session'); // old device-only login, no longer used
+let sb=null,unlocked=false,curUser=null,fails=0,lockUntil=0,notice=null;
 const brand=`<div class="abrand"><div class="acup">☕</div><h1>Sullivan Taylor Uptown</h1><div class="muted">Inventory</div></div>`;
 const pwField=(id,label,ac)=>`<label class="afield"><span>${label}</span><span class="pwwrap"><input type="password" id="${id}" autocomplete="${ac}" required><button type="button" class="light sm pwtog" data-for="${id}" aria-label="Show password">Show</button></span></label>`;
+const emailField=(ac='username')=>`<label class="afield"><span>Email</span><input type="email" id="aem" autocomplete="${ac}" inputmode="email" autocapitalize="off" spellcheck="false" required value="${esc(carryEmail||localStorage.getItem(LAST_EMAIL)||'')}"></label>`;
+let carryEmail=''; // keep what was typed when switching between sign-in / create / forgot
 function bindToggles(root){root.querySelectorAll('.pwtog').forEach(b=>b.onclick=()=>{const i=document.getElementById(b.dataset.for);const show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'Hide':'Show';b.setAttribute('aria-label',show?'Hide password':'Show password')})}
-function showAuth(mode){APP.hidden=true;A.hidden=false;
- if(!window.crypto||!crypto.subtle){A.innerHTML=`<div class="acard">${brand}<h2>Can’t start securely</h2><p class="aerr">This browser isn’t allowing secure password features here (crypto.subtle is unavailable). Open the app over <b>https://</b> or from <b>localhost</b>, or in an up-to-date browser.</p></div>`;return}
- authMode=mode||(getAuth()?'signin':'setup');
- if(authMode==='setup'){A.innerHTML=`<form class="acard" id="af">${brand}<h2>Set your password</h2>
-  <p class="muted">First time on this device. Choose a password (at least ${MIN_PW} characters).</p>
-  <label class="afield"><span>Username</span><input type="text" id="au" value="${esc(USERNAME)}" readonly></label>
-  ${pwField('ap','Password','new-password')}${pwField('ap2','Confirm password','new-password')}
-  <div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Set password &amp; continue</button></form>`;
-  bindToggles(A);af.onsubmit=async e=>{e.preventDefault();const p1=ap.value,p2=ap2.value;
-   if(p1.length<MIN_PW)return ae.textContent=`Password must be at least ${MIN_PW} characters.`;if(p1!==p2)return ae.textContent='Passwords don’t match.';
-   asub.disabled=true;await setPassword(p1);showCode(await newRecovery(),'',unlock)};ap.focus();return}
- if(authMode==='forgot'){A.innerHTML=`<form class="acard" id="af">${brand}<h2>Forgot password</h2>
-  <p class="muted">Enter the recovery code you wrote down when the password was set. This lock is for this device only; your inventory stays as it is.</p>
-  <label class="afield"><span>Username</span><input type="text" id="au" value="${esc(USERNAME)}" autocomplete="username"></label>
-  <label class="afield"><span>Recovery code</span><input type="text" id="arc" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+const noteHtml=()=>{const n=notice;notice=null;return n?`<div class="${n.ok?'aok':'aerr'}" id="anote" role="status">${esc(n.text)}</div>`:''};
+function errText(e){const m=(e&&(e.message||e.error_description))||String(e||'');
+ if(/invalid login credentials/i.test(m))return 'That email or password isn’t right.';
+ if(/email not confirmed/i.test(m))return 'Please confirm your email first. Open the link we emailed you, then sign in.';
+ if(/already registered|already exists/i.test(m))return 'That email already has an account. Sign in instead, or use Forgot password.';
+ if(/rate limit|too many|security purposes/i.test(m))return 'Too many tries for now. Wait a minute and try again.';
+ if(/same.*password|different from the old/i.test(m))return 'Choose a password different from the old one.';
+ if(/weak|at least|characters/i.test(m))return 'That password is too weak. '+m;
+ if(navigator.onLine===false||/fetch|network|load failed|timeout/i.test(m)||(e&&e.status===0))return 'Can’t reach the server. Check your internet connection and try again.';
+ return m||'Something went wrong. Please try again.'}
+const validEmail=v=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+function storedSession(){try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(/^sb-.*-auth-token$/.test(k)){const s=JSON.parse(localStorage.getItem(k));const u=s&&(s.user||(s.currentSession&&s.currentSession.user));if(u&&u.id)return{key:k,user:u}}}}catch{}return null}
+function unlock(user,client){unlocked=true;curUser=user;if(user.email)localStorage.setItem(LAST_EMAIL,user.email);
+ A.hidden=true;A.innerHTML='';APP.hidden=false;S=load();tab='inventory';histSel=null;render();Sync.start(user,client)}
+function lock(){unlocked=false;curUser=null;Sync.stop();APP.hidden=true;V.innerHTML='';if(!sb)return showMsg('Can’t reach the sign-in service','Check your internet connection, then try again.',true);showAuth('signin')}
+function showMsg(title,text,reload){APP.hidden=true;A.hidden=false;A.innerHTML=`<div class="acard">${brand}<h2>${esc(title)}</h2><p class="muted">${text}</p>${reload?'<button class="abtn" id="areload">Try again</button>':''}</div>`;
+ if(reload)areload.onclick=()=>location.reload()}
+function busy(on){asub.disabled=on}
+function showAuth(mode){const t=document.getElementById('aem');carryEmail=t?t.value.trim():'';APP.hidden=true;A.hidden=false;
+ if(mode==='create'){A.innerHTML=`<form class="acard" id="af" novalidate>${brand}<h2>Create account</h2>
+  <p class="muted">Set up the shop’s account once, then sign in with the same email and password on every phone and computer. Use an email you can open: password reset links go there.</p>
+  ${emailField('email')}${pwField('ap','Password','new-password')}${pwField('ap2','Confirm password','new-password')}
+  <div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Create account</button><button type="button" class="light abtn" id="aback">Back to sign in</button></form>`;
+  bindToggles(A);aback.onclick=()=>showAuth('signin');(aem.value?ap:aem).focus();
+  af.onsubmit=async e=>{e.preventDefault();ae.textContent='';const em=aem.value.trim();
+   if(!validEmail(em))return ae.textContent='Enter a valid email address.';
+   if(ap.value.length<MIN_PW)return ae.textContent=`Password must be at least ${MIN_PW} characters.`;if(ap.value!==ap2.value)return ae.textContent='Passwords don’t match.';
+   busy(true);const {data,error}=await sb.auth.signUp({email:em,password:ap.value,options:{emailRedirectTo:APP_URL}});
+   if(error){busy(false);return ae.textContent=errText(error)}
+   localStorage.setItem(LAST_EMAIL,em);
+   if(!data.session){notice={ok:1,text:`Almost done. We emailed a confirmation link to ${em}. Open it, then sign in here.`};showAuth('signin')}}; // with a session, SIGNED_IN opens the app
+  return}
+ if(mode==='forgot'){A.innerHTML=`<form class="acard" id="af" novalidate>${brand}<h2>Forgot password</h2>
+  <p class="muted">Enter the account email. We’ll email you a link. Open it on any device to choose a new password. Your inventory stays as it is.</p>
+  ${emailField('email')}<div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Email me a reset link</button><button type="button" class="light abtn" id="aback">Back to sign in</button></form>`;
+  aback.onclick=()=>showAuth('signin');aem.focus();
+  af.onsubmit=async e=>{e.preventDefault();ae.className='aerr';ae.textContent='';const em=aem.value.trim();if(!validEmail(em))return ae.textContent='Enter a valid email address.';
+   busy(true);const {error}=await sb.auth.resetPasswordForEmail(em,{redirectTo:APP_URL});busy(false);
+   if(error)return ae.textContent=errText(error);localStorage.setItem(LAST_EMAIL,em);
+   ae.className='aok';ae.textContent=`If ${em} has an account, a reset link is on its way. Check your inbox (and spam).`};return}
+ if(mode==='recover'){A.innerHTML=`<form class="acard" id="af" novalidate>${brand}<h2>Set a new password</h2>
+  <p class="muted">You opened a password reset link${curUserEmail()?` for <b>${esc(curUserEmail())}</b>`:''}. Choose a new password.</p>
   ${pwField('ap','New password','new-password')}${pwField('ap2','Confirm new password','new-password')}
-  <div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Set new password</button><button type="button" class="light abtn" id="aback">Back to sign in</button></form>`;
-  bindToggles(A);aback.onclick=()=>showAuth('signin');
-  af.onsubmit=async e=>{e.preventDefault();if(backoffBlocked())return;
+  <div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Save new password</button></form>`;
+  bindToggles(A);ap.focus();
+  af.onsubmit=async e=>{e.preventDefault();ae.textContent='';
    if(ap.value.length<MIN_PW)return ae.textContent=`New password must be at least ${MIN_PW} characters.`;if(ap.value!==ap2.value)return ae.textContent='Passwords don’t match.';
-   asub.disabled=true;if(!await verifyRecovery(au.value,arc.value))return failed('That username or recovery code isn’t right.');
-   fails=0;await setPassword(ap.value);showCode(await newRecovery(),'Password reset. Your old recovery code no longer works. Here is your new one:',unlock)};return}
- A.innerHTML=`<form class="acard" id="af">${brand}<h2>Sign in</h2>
-  <label class="afield"><span>Username</span><input type="text" id="au" value="${esc(USERNAME)}" autocomplete="username"></label>
-  ${pwField('ap','Password','current-password')}
+   busy(true);const {data,error}=await sb.auth.updateUser({password:ap.value});
+   if(error){busy(false);return ae.textContent=errText(error)}
+   recovering=false;const {data:sd}=await sb.auth.getSession();const u=(sd.session&&sd.session.user)||data.user;unlock(u,sb);toast('Password updated.')};return}
+ A.innerHTML=`<form class="acard" id="af" novalidate>${brand}<h2>Sign in</h2>${noteHtml()}
+  ${emailField('username')}${pwField('ap','Password','current-password')}
   <div class="aerr" id="ae" role="alert"></div><button class="abtn" id="asub">Sign in</button>
-  <button type="button" class="linkbtn" id="aforgot">Forgot password?</button></form>`;
- bindToggles(A);aforgot.onclick=()=>showAuth('forgot');ap.focus();
- af.onsubmit=async e=>{e.preventDefault();if(backoffBlocked())return;
-  asub.disabled=true;if(await verify(au.value,ap.value)){fails=0;unlock();return}
-  ap.value='';failed('That username or password isn’t right.')}}
+  <button type="button" class="linkbtn" id="aforgot">Forgot password?</button>
+  <button type="button" class="linkbtn" id="acreate">First time? Create account</button></form>`;
+ bindToggles(A);aforgot.onclick=()=>showAuth('forgot');acreate.onclick=()=>showAuth('create');(aem.value?ap:aem).focus();
+ af.onsubmit=async e=>{e.preventDefault();ae.textContent='';const em=aem.value.trim();if(backoffBlocked())return;
+  if(!validEmail(em))return ae.textContent='Enter a valid email address.';if(!ap.value)return ae.textContent='Enter your password.';
+  busy(true);const {error}=await sb.auth.signInWithPassword({email:em,password:ap.value});
+  if(error){ap.value='';if(/invalid login/i.test(error.message||''))return failed(errText(error));busy(false);return ae.textContent=errText(error)}
+  fails=0;localStorage.setItem(LAST_EMAIL,em)}} // SIGNED_IN opens the app
+const curUserEmail=()=>curUser&&curUser.email||'';
 function backoffBlocked(){const wait=lockUntil-Date.now();if(wait>0){ae.textContent=`Too many tries. Wait ${Math.ceil(wait/1000)}s and try again.`;return true}return false}
 function failed(msg){fails++;const delay=fails>=3?Math.min(30,2**(fails-2))*1000:0;lockUntil=Date.now()+delay;
  ae.textContent=msg+(delay?` Please wait ${delay/1000}s before trying again.`:'');setTimeout(()=>{if(document.body.contains(asub))asub.disabled=false},delay)}
-function showCode(code,intro,next){APP.hidden=true;V.innerHTML='';A.hidden=false;
- A.innerHTML=`<div class="acard">${brand}<h2>Write this down</h2><p class="muted">${intro||'This is your recovery code. If you forget the password, it is the only way back in.'} It is shown <b>only once</b> and can’t be viewed again.</p>
- <label class="afield"><span>Recovery code <span class="muted" style="font-weight:400">(tap to select)</span></span><input class="rcode" id="rcode" type="text" value="${code}" readonly aria-label="Recovery code" autocomplete="off" spellcheck="false" inputmode="none"></label><button type="button" class="light abtn" id="rcopy">Copy code</button>
- <label class="acheck"><input type="checkbox" id="rsaved"> I’ve saved my recovery code somewhere safe</label>
- <button class="abtn" id="rcont" disabled>Continue</button></div>`;
- const selAll=()=>{rcode.focus();rcode.select();rcode.setSelectionRange(0,rcode.value.length)};rcode.onfocus=rcode.onclick=selAll;
- rcopy.onclick=async()=>{try{if(!navigator.clipboard)throw 0;await navigator.clipboard.writeText(rcode.value);rcopy.textContent='Copied ✓'}catch{selAll();rcopy.textContent='Selected, press copy'}};
- rsaved.onchange=()=>rcont.disabled=!rsaved.checked;rcont.onclick=()=>{if(!rsaved.checked)return;code=null;next()}}
-// Account footer on the Database tab: change password + log out
+function onAuth(ev,session){
+ if(ev==='PASSWORD_RECOVERY'){recovering=true;if(unlocked){unlocked=false;Sync.stop()}curUser=session&&session.user;return showAuth('recover')}
+ if(!session){if(ev==='INITIAL_SESSION'){const st=storedSession();if(st&&navigator.onLine===false)return unlock(st.user,sb)} // offline: open with this device's data
+  if(unlocked||ev==='INITIAL_SESSION'){if(linkError&&ev==='INITIAL_SESSION'){notice={text:/expired|invalid/i.test(linkError)?'That email link has expired or was already used. Request a new one with Forgot password.':linkError};linkError=''}lock()}return}
+ if(recovering){curUser=session.user;return showAuth('recover')}
+ if(!unlocked)unlock(session.user,sb);else if(curUser&&curUser.id!==session.user.id){Sync.stop();unlock(session.user,sb)}
+ else curUser=session.user}
+// Account section on the Database tab: who is signed in + change password
 const _database=database;
 database=function(){_database();V.insertAdjacentHTML('beforeend',`<details class="card acct"><summary>Account &amp; password</summary>
- <p class="muted">Signed in as <b>${esc(USERNAME)}</b>. This password locks the app on this device only.</p>
- <form id="cpf" class="cpf">${pwField('cpo','Current password','current-password')}${pwField('cpn','New password','new-password')}${pwField('cpn2','Confirm new password','new-password')}
- <div class="aerr" id="cpe" role="alert"></div><button id="cps">Change password</button></form>
- <form id="rcf" class="cpf"><h4 style="margin:10px 0 0">Recovery code</h4><p class="muted" style="margin:0">Changing your password keeps your current recovery code. Making a new one makes the old code stop working.</p>
- ${pwField('rco','Current password','current-password')}<div class="aerr" id="rce" role="alert"></div><button id="rcs" class="light">Make a new recovery code</button></form></details>`);
- bindToggles(V);cpf.onsubmit=async e=>{e.preventDefault();cpe.className='aerr';
-  if(!await verify(USERNAME,cpo.value))return cpe.textContent='Current password is incorrect.';
+ <p class="muted">Signed in as <b>${esc(curUserEmail()||'the shop account')}</b>. Your inventory syncs to this account on every device that signs in with it.</p>
+ ${sb?`<form id="cpf" class="cpf" novalidate>${pwField('cpn','New password','new-password')}${pwField('cpn2','Confirm new password','new-password')}
+ <div class="aerr" id="cpe" role="alert"></div><button id="cps">Change password</button></form>`:'<p class="muted">Connect to the internet and reload to change the password.</p>'}</details>`);
+ if(!sb)return;bindToggles(V);cpf.onsubmit=async e=>{e.preventDefault();cpe.className='aerr';cpe.textContent='';
   if(cpn.value.length<MIN_PW)return cpe.textContent=`New password must be at least ${MIN_PW} characters.`;
   if(cpn.value!==cpn2.value)return cpe.textContent='New passwords don’t match.';
-  const rec=await setPassword(cpn.value);SESSION_STORE.setItem(SESSION_KEY,rec.hash);cpf.reset();cpe.className='aok';cpe.textContent='Password changed. Your recovery code is unchanged.'};
- rcf.onsubmit=async e=>{e.preventDefault();if(!await verify(USERNAME,rco.value))return rce.textContent='Current password is incorrect.';
-  showCode(await newRecovery(),'New recovery code created. Your old code no longer works.',()=>{unlock();tab='database';render()})}};
-logoutBtn.onclick=lock;
-if(signedIn())unlock();else showAuth();
+  cps.disabled=true;const {error}=await sb.auth.updateUser({password:cpn.value});cps.disabled=false;
+  if(error)return cpe.textContent=errText(error);cpf.reset();cpe.className='aok';cpe.textContent='Password changed. Use the new password on your other devices too.'}};
+logoutBtn.onclick=async()=>{logoutBtn.disabled=true;try{await Sync.flush();if(sb)await sb.auth.signOut({scope:'local'});else{const st=storedSession();if(st)localStorage.removeItem(st.key)}}catch{}
+ logoutBtn.disabled=false;if(unlocked)lock()};
+// start
+if(!CONFIGURED)showMsg('Online sign-in isn’t set up yet','The Supabase project URL and key still need to be added to <b>config.js</b>. Your inventory on this device is safe and will sync once it’s set up.');
+else if(!(window.supabase&&window.supabase.createClient)){const st=storedSession();if(st)unlock(st.user,null);else showMsg('Can’t reach the sign-in service','Check your internet connection, then try again.',true)}
+else{sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{flowType:'implicit',persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+ sb.auth.onAuthStateChange((ev,session)=>setTimeout(()=>onAuth(ev,session),0))} // setTimeout: don't call Supabase from inside its own callback

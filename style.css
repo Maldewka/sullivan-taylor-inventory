@@ -94,3 +94,50 @@ input.rcode:focus{outline:3px solid #8a5a3c;outline-offset:1px}
 .top{position:relative}.syncst{position:absolute;left:16px;bottom:2px;font-size:.66rem;line-height:1;color:rgba(255,255,255,.72);pointer-events:none;white-space:nowrap}
 .syncst[data-s=offline],.syncst[data-s=local],.syncst[data-s=error]{color:#ffd9a8}
 @media(max-width:480px){.syncst{left:14px}}@media(max-width:370px){.syncst{left:10px}}
+
+/* sales tracking on History */
+.salesBar{align-items:flex-start}.salesBar b{padding-top:6px;font-size:1.05rem}
+.salesWin{flex-wrap:wrap}.salesRange{margin:-6px 0 12px;font-size:.9rem}
+.histHead{font-size:1.05rem;margin:18px 0 10px;color:#5b3a29}
+.sold{color:#5b3a29;font-weight:700;white-space:nowrap}
+@media(max-width:480px){.salesBar{flex-direction:column;align-items:stretch;gap:8px}
+.salesWin{width:100%}.salesWin button{flex:1 1 calc(50% - 4px);min-height:40px}}
+
+/* sales end date (History > Sales and print view) */
+.salesEndBox{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.9rem}
+.salesEndLbl{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#5b3a29}
+input.salesEnd{font:inherit;font-weight:400;min-height:40px;border:1px solid #d6c8bc;border-radius:10px;padding:0 8px;background:#fff;color:#2b211c}
+@media(max-width:480px){.salesEndBox{width:100%}.salesEndLbl{flex:1 1 100%}input.salesEnd{flex:1;min-width:0}.salesEndBox button{flex:1}}
+/* print-friendly view: typewriter / receipt */
+#printView{display:none}
+body.printView{background:#fff}
+body.printView .top,body.printView .tabs,body.printView main{display:none}
+body.printView #printView{display:block;max-width:560px;margin:0 auto;padding:14px 14px 40px}
+.pvCtl{border-bottom:1px solid #ddd;padding-bottom:10px;margin-bottom:16px}
+.pvBtns{display:flex;gap:8px;margin-bottom:10px}.pvBtns button{flex:1;font-weight:600}
+.pvSales{margin-bottom:6px}.pvHint{font-size:.82rem;margin:0}
+.receipt{font-family:"Courier New",Courier,"Nimbus Mono PS","Liberation Mono",ui-monospace,monospace;color:#000;background:#fff;max-width:42ch;margin:0 auto;font-size:14px;line-height:1.35}
+.rTitle{text-align:center;text-transform:uppercase;letter-spacing:.08em;font-weight:700;font-size:15px}
+.receipt h2.rSales{text-align:center;font-size:14px;font-weight:700;margin:2px 0 6px;text-transform:uppercase;letter-spacing:.3em}
+.rRange,.rWin{text-align:center}.rWin{font-size:13px}
+.rRule{border-top:1px dashed #000;margin:8px 0}.rRule.thin{border-top-style:dotted;margin:2px 0 6px}
+.rCols{display:flex;justify-content:space-between;font-size:12px;letter-spacing:.1em}
+.rGroup{margin:0 0 8px}
+.rHead{text-transform:uppercase;font-weight:700;text-decoration:underline;margin:6px 0 2px}
+.rLine{display:flex;align-items:baseline;gap:4px;padding-left:1ch}
+.rName{min-width:0;overflow-wrap:anywhere}.rDots{flex:1;border-bottom:1px dotted #000;min-width:2ch;transform:translateY(-3px)}
+.rQty{white-space:nowrap;text-align:right;min-width:3ch;font-weight:700}
+.rEmpty{text-align:center;margin:12px 0}
+.rFoot{font-size:12px;text-align:center}
+@media print{
+ @page{margin:12mm}
+ body,body.printView{background:#fff!important;color:#000}
+ body.printView .top,body.printView .tabs,body.printView main,body.printView .noprint,body.printView #toast{display:none!important}
+ body.printView #printView{max-width:none;padding:0;margin:0}
+ .receipt{font-size:11pt;max-width:42ch}
+ .rRule,.rDots{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+/* 4 header buttons (Print/Export/Import/Log out) on phones: keep the shop name readable */
+@media(max-width:480px){.tools{gap:3px}.tools .ghost{min-width:36px;width:36px}.top{gap:6px}}
+@media(max-width:370px){.tools{gap:2px}.tools .ghost{min-width:34px;width:34px}.tools .ico{font-size:.98rem}}
+.salesOff .salesBar{margin-bottom:6px}

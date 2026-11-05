@@ -1,11 +1,11 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Cache-Control" content="no-cache"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#5b3a29"><title>Sullivan Taylor Uptown · Inventory</title>
-<link rel="stylesheet" href="style.css?v=20261104-4"></head><body>
+<link rel="stylesheet" href="style.css?v=20261105-1"></head><body>
 <div id="auth" hidden></div>
 <div id="app" hidden>
 <header class="top"><h1>☕ Sullivan Taylor Uptown</h1><span id="syncStatus" class="syncst" role="status" aria-live="polite"></span>
-<div class="tools"><button id="exportBtn" class="ghost" aria-label="Export backup" title="Export backup"><span class="ico">⤓</span><span class="lbl">Export</span></button>
+<div class="tools"><button id="printBtn" class="ghost" aria-label="Print friendly sales view" title="Print friendly sales view"><span class="ico">🖨️</span><span class="lbl">Print</span></button><button id="exportBtn" class="ghost" aria-label="Export backup" title="Export backup"><span class="ico">⤓</span><span class="lbl">Export</span></button>
 <label class="ghost btnlike" aria-label="Import backup" title="Import backup"><span class="ico">⤒</span><span class="lbl">Import</span><input id="importFile" type="file" accept="application/json" hidden></label><button id="logoutBtn" class="ghost" aria-label="Log out" title="Log out"><span class="ico">⏻</span><span class="lbl">Log out</span></button></div></header>
 <nav class="tabs">
 <button data-tab="inventory" class="active">Inventory</button>
@@ -13,11 +13,12 @@
 <button data-tab="database">Database</button>
 <button data-tab="history">History</button></nav>
 <main id="view"></main>
+<div id="printView"></div>
 </div>
 <!-- supabase-js v2.118.0 (official Supabase JavaScript client, MIT license). Source: npm package @supabase/supabase-js@2.118.0,
  file dist/umd/supabase.js, served by the jsDelivr CDN. Pinned version + integrity hash (matches the npm tarball, checked 2026-11-04). -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/dist/umd/supabase.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" crossorigin="anonymous"></script>
-<script src="config.js?v=20261104-4"></script>
-<script src="app.js?v=20261104-4"></script>
-<script src="sync.js?v=20261104-4"></script>
-<script src="auth.js?v=20261104-4"></script></body></html>
+<script src="config.js?v=20261105-1"></script>
+<script src="app.js?v=20261105-1"></script>
+<script src="sync.js?v=20261105-1"></script>
+<script src="auth.js?v=20261105-1"></script></body></html>

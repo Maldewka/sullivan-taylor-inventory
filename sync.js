@@ -29,17 +29,14 @@ const Sync=(()=>{
   const {data:row,error}=await sb.from(TABLE).select('data,updated_at').eq('user_id',uid).maybeSingle();
   if(error)return fail(error);if(!user||user.id!==uid)return;clearTimeout(retry);
   const m=meta(),known=m.user===uid; // has this device synced with this account before?
-  if(!row){setMeta({...m,user:uid,dirty:true,localModified:m.localModified||new Date().toISOString()});return doPush()} // first device: upload what is here
-  if(known&&row.updated_at===m.lastSynced){if(m.dirty)return doPush();return setStatus('synced')}
-  let useRemote;
+  if(!known){ // first sign-in of this account on this device: the account only ever gets its own cloud data or a clean slate, never this device's data
+   if(!row){S=seeded();localStorage.setItem(KEY,JSON.stringify(S));setMeta({user:uid,dirty:true,localModified:new Date().toISOString()});rerender();return doPush()} // brand-new account: 12 empty starter headers
+   return applyRemote(row)}
+  if(!row){setMeta({...m,dirty:true,localModified:m.localModified||new Date().toISOString()});return doPush()} // this device already started this account but the first upload hasn't landed yet: upload it, don't wipe edits
+  if(row.updated_at===m.lastSynced){if(m.dirty)return doPush();return setStatus('synced')}
   const remoteEdit=(row.data&&row.data._edited)||row.updated_at;
-  if(known)useRemote=!m.dirty||!(m.localModified>remoteEdit); // both changed since last sync: newest edit wins
-  else if(sameData(S,row.data)||pristine(S))useRemote=true;
-  else if(pristine(row.data))useRemote=false;
-  else useRemote=!confirm('Your online account already has inventory data, and this device has different data.\n\nOK = keep THIS DEVICE’s data (it replaces the online copy).\nCancel = use the ONLINE data on this device.');
-  if(useRemote){if(!known&&!pristine(S)&&!sameData(S,row.data))localStorage.setItem('coffeeInventory.beforeSync',JSON.stringify(S)); // safety copy
-   applyRemote(row)}
-  else{setMeta({...m,user:uid,dirty:true,localModified:known&&m.localModified?m.localModified:new Date().toISOString()});return doPush()}}
+  if(!m.dirty||!(m.localModified>remoteEdit))applyRemote(row); // both changed since last sync: newest edit wins
+  else return doPush()}
  function applyRemote(row){const d=clean(row.data);if(!Array.isArray(d.headers)||!Array.isArray(d.snapshots))return fail(new Error('Online data is not valid'));
   const changedData=!sameData(S,d);S=d;localStorage.setItem(KEY,JSON.stringify(S));
   setMeta({user:user.id,lastSynced:row.updated_at,dirty:false,localModified:(row.data&&row.data._edited)||row.updated_at});setStatus('synced');if(changedData)rerender()}
@@ -47,7 +44,11 @@ const Sync=(()=>{
   if(histSel&&!S.snapshots.some(x=>x.id===histSel))histSel=null;render();if(sel){const e=V.querySelector('input'+sel);if(e)e.focus()}}
  function subscribe(){if(!sb.channel)return;try{chan=sb.channel('inventory-'+user.id).on('postgres_changes',{event:'*',schema:'public',table:TABLE,filter:'user_id=eq.'+user.id},
   p=>{if(!p.new||p.new.updated_at!==meta().lastSynced)pull()}).subscribe()}catch(e){chan=null}}
- function start(u,client){sb=client||null;user=u;if(!sb){setStatus('local');return}setStatus('syncing');subscribe();pull()}
+ function start(u,client){sb=client||null;user=u;
+  if(meta().user!==u.id){ // this device's data isn't this account's: never show or reuse it. Keep a safety copy, show empty headers until the cloud copy arrives.
+   try{const dev=JSON.parse(localStorage.getItem(KEY));if(dev&&!pristine(dev))localStorage.setItem('coffeeInventory.beforeSync',JSON.stringify(dev))}catch{}
+   S=seeded();rerender()}
+  if(!sb){setStatus('local');return}setStatus('syncing');subscribe();pull()}
  function stop(){clearTimeout(timer);clearTimeout(retry);if(chan&&sb)try{sb.removeChannel(chan)}catch{}chan=null;user=null;setStatus('')}
  async function flush(ms=4000){if(!user||!sb||!meta().dirty)return;await Promise.race([push(),new Promise(r=>setTimeout(r,ms))])}
  document.addEventListener('visibilitychange',()=>{if(!user||!sb)return;if(document.visibilityState==='visible')pull();else if(meta().dirty)push()});

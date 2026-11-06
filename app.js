@@ -17,11 +17,12 @@ function render(){closeSheet();document.body.classList.toggle('printView',printM
 // snapshot helpers
 // Primary count is the only number that feeds below-par, the Order List, and Overhead.
 // count2 / count2Label are kept for reference when an item is counted in a second unit.
-// count2Location is an optional place name for that second count. Missing or blank means none.
+// location is where the item sits in the store. count2Location is the place for the second count.
+// Both are optional free text. Neither is a catalog header. Missing or blank means none.
 function freeze(counts,skipped={},counts2={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>{
  const label=String(i.count2Label||'').trim();
- const loc2=itemCount2Loc(i);
- const stamp=row=>{if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}return row};
+ const loc2=itemCount2Loc(i),place=itemLoc(i);
+ const stamp=row=>{if(place)row.location=place;if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}return row};
  if(skipped[i.id])return stamp({name:i.name,par:i.par,count:null,skipped:true});
  const row=stamp({name:i.name,par:i.par,count:counts[i.id]??null});
  if(label)row.count2=counts2[i.id]??null;
@@ -30,9 +31,10 @@ function shortList(groups){return groups.map(g=>({name:g.name,items:g.items.filt
 function latest(){return S.snapshots[S.snapshots.length-1]}
 // allowDecimal false = whole units. Missing keeps the old decimal number-input behavior.
 // count2Label empty/missing = a single count. Ordering never uses the second count.
-// count2Location is optional free text. Non-strings and blanks are treated as unset so older items load cleanly.
+// location and count2Location are optional free text. Non-strings and blanks are unset so older items load cleanly.
 const itemDecimal=i=>!i||i.allowDecimal!==false;
 const itemCount2=i=>String(i&&i.count2Label||'').trim();
+const itemLoc=i=>{const v=i&&i.location;return typeof v==='string'?v.trim():''};
 const itemCount2Loc=i=>{const v=i&&i.count2Location;return typeof v==='string'?v.trim():''};
 let onSheetKey=null;
 function closeSheet(){
@@ -79,9 +81,10 @@ function stepHtml(label,id,val,dec){
 function openCountSheet(id){
  const loc=locateItem(id);if(!loc||!S.draft)return;
  const d=S.draft;d.counts=d.counts||{};d.counts2=d.counts2||{};d.skipped=d.skipped||{};
- const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),sk=!!d.skipped[id];
+ const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id];
  const c2ui=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+(loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:''):'';
- const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">PAR ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${c2ui}<div class="sheetLoc">Location: ${esc(loc.header.name)}</div></div><div class="sheetFoot"><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
+ const placeUi=place?`<div class="sheetLoc">Location: ${esc(place)}</div>`:'';
+ const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">PAR ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${c2ui}${placeUi}</div><div class="sheetFoot"><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const applySkip=on=>{
   const b=form.querySelector('#shSkip');
@@ -108,25 +111,14 @@ function openCountSheet(id){
  const first=form.querySelector('#shCount');
  setTimeout(()=>{if(first&&!first.disabled)first.focus();else form.querySelector('#shSkip').focus()},0);
 }
-// Primary location is free text and is the inventory section name. Match a header by trimmed,
-// case-insensitive name, or create one. preferGi stays put when that header already has the typed name.
-function headerForLocation(name,preferGi){
- const trimmed=String(name==null?'':name).trim(),key=trimmed.toLowerCase();
- if(!key)return -1;
- const same=i=>String((S.headers[i]&&S.headers[i].name)||'').trim().toLowerCase()===key;
- if(preferGi>=0&&same(preferGi))return preferGi;
- const i=S.headers.findIndex((_,n)=>same(n));
- if(i>=0)return i;
- S.headers.push({id:uid(),name:trimmed,items:[]});
- return S.headers.length-1;
-}
 function openItemSheet(o){
  const isEdit=o.mode==='edit',gi=o.gi,ii=isEdit?o.ii:-1;
  const cur=isEdit?(S.headers[gi]&&S.headers[gi].items[ii]):null;
  if(isEdit&&!cur)return;
  const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'',loc2=lab?itemCount2Loc(cur):'';
- const locName=String((S.headers[gi]&&S.headers[gi].name)||''); // older items have no location field; the header name is the place
- const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield">Location<input id="shLoc" type="text" autocomplete="off" placeholder="walk-in, bar fridge" value="${esc(locName)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const place=isEdit?itemLoc(cur):''; // older items have no location; the box stays blank
+ const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">Category<select id="shCat">${opts}</select></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield"><span>Location <span class="muted opt">optional</span></span><input id="shLoc" type="text" autocomplete="off" placeholder="walk-in, bar fridge" value="${esc(place)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),locI=form.querySelector('#shC2loc'),err=form.querySelector('#shErr');
  form.addEventListener('input',()=>{err.textContent=''});
@@ -143,13 +135,13 @@ function openItemSheet(o){
   if(!isFinite(par)||par<0){err.textContent='PAR must be a number that is 0 or more.';return}
   const cost=parseCost(form.querySelector('#shCost').value);
   if(Number.isNaN(cost)){err.textContent='Cost must be a dollar amount, like 4.50.';return}
-  const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim();
+  const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim(),placeV=form.querySelector('#shLoc').value.trim();
   if(want2&&!label){err.textContent='Name the second count, like bags or cases, or turn it off.';return}
   const now=isEdit?locateItem(cur.id):null;
   if(isEdit&&!now){err.textContent='That item is no longer in the database.';return}
-  const toGi=headerForLocation(form.querySelector('#shLoc').value,isEdit?now.gi:gi);
-  if(toGi<0){err.textContent='Enter a location.';form.querySelector('#shLoc').focus();return}
-  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
+  const toGi=+form.querySelector('#shCat').value; // catalog section only; location text never creates or moves a header
+  if(!S.headers[toGi]){err.textContent='Choose a category.';return}
+  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(placeV)it.location=placeV;else delete it.location;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
   if(isEdit){
    write(now.item);
    if(toGi!==now.gi){S.headers[now.gi].items.splice(now.ii,1);S.headers[toGi].items.push(now.item)}
@@ -174,13 +166,14 @@ function inventory(){
   for(const i of g.items){
    const sk=!!d.skipped[i.id],c=d.counts[i.id],has=c!=null&&!sk;
    const cls=sk?'skipped':has?'counted':'uncounted';
-   const c2lab=itemCount2(i),c2n=d.counts2[i.id],c2loc=c2lab?itemCount2Loc(i):'';
+   const c2lab=itemCount2(i),c2n=d.counts2[i.id],c2loc=c2lab?itemCount2Loc(i):'',place=itemLoc(i);
    let stat='';
    if(sk)stat='Skipped';
    else if(has){stat=String(c);if(c2lab&&c2n!=null)stat+=' · '+c2n+' '+c2lab+(c2loc?' · '+c2loc:'')}
-   const aria=sk?'Skipped '+i.name:has?i.name+', '+stat:'Count '+i.name;
+   const aria=(sk?'Skipped '+i.name:has?i.name+', '+stat:'Count '+i.name)+(place?', '+place:'');
    const c2quiet=has&&c2lab&&c2n!=null?`<span class="muted invC2">${esc(c2n+' '+c2lab+(c2loc?' · '+c2loc:''))}</span>`:'';
-   h+=`<button type="button" class="item invRow ${cls}" data-id="${esc(i.id)}" data-state="${cls}" aria-label="${esc(aria)}"><span class="name">${esc(i.name)}</span><span class="invNums"><span class="invStat">${esc(sk?stat:has?String(c):'')}</span>${c2quiet}</span></button>`}
+   const placeUi=place?`<span class="muted invLoc">${esc(place)}</span>`:'';
+   h+=`<button type="button" class="item invRow ${cls}" data-id="${esc(i.id)}" data-state="${cls}" aria-label="${esc(aria)}"><span class="name">${esc(i.name)}${placeUi}</span><span class="invNums"><span class="invStat">${esc(sk?stat:has?String(c):'')}</span>${c2quiet}</span></button>`}
   h+=`</section>`}
  V.innerHTML=h;
  V.querySelectorAll('.invRow').forEach(b=>b.onclick=()=>openCountSheet(b.dataset.id));
@@ -199,7 +192,7 @@ function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
 function count2Note(i){const label=String(i&&i.count2Label||'').trim();if(!label||i.count2==null)return '';const loc=itemCount2Loc(i);return ` <span class="muted c2note">· ${esc(i.count2)} ${esc(label)}${loc?` · ${esc(loc)}`:''}</span>`}
-function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
+function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);const place=itemLoc(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${place?`<div class="muted locNote">${esc(place)}</div>`:''}${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
 const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
@@ -311,7 +304,7 @@ function database(){
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;
-  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'';h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
+  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'',place=itemLoc(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${place?`<div class="muted dbC2">${esc(place)}</div>`:''}${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
  q('.hsw button').forEach(b=>b.onclick=()=>{const k=b.dataset.hs;const set=HS.split(' ').filter(x=>x&&x!==k);if(!hsOn(k))set.push(k);HS=set.sort().join(' ');localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});

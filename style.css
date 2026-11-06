@@ -202,7 +202,8 @@ body.reorder .item label.icostL input{width:56px}
 .card.invSec .invSticky{position:sticky;top:53px;z-index:4;margin:0 -12px 2px;padding:10px 14px;border-radius:14px 14px 0 0;background:#fff;box-shadow:0 1px 0 rgba(43,33,28,.08)}
 body[data-hs~=tint] .card.invSec .invSticky{background:#e9d8c8}
 button.invRow{background:transparent;color:#2b211c;width:100%;border-radius:0;font-weight:600;text-align:left;padding:11px 10px;min-height:48px;gap:10px;box-shadow:inset 4px 0 0 #e4d5c8;touch-action:manipulation}
-button.invRow .name{line-height:1.25}
+button.invRow .name{display:flex;flex-direction:column;align-items:flex-start;line-height:1.25}
+button.invRow .invLoc{font-size:.78rem;font-weight:500;line-height:1.15}
 button.invRow .invNums{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none;min-width:0;max-width:58%}
 button.invRow .invStat{flex:none;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 button.invRow .invC2{font-size:.75rem;font-weight:600;line-height:1.15;text-align:right}
@@ -211,6 +212,7 @@ button.invRow.counted{background:#f4efe6;box-shadow:inset 4px 0 0 #6e8f55}
 button.invRow.counted .invStat{color:#3f6b32}
 button.invRow.skipped{background:#faf7f4;box-shadow:inset 4px 0 0 #d6c8bc}
 button.invRow.skipped .name{color:#a8988d;text-decoration:line-through}
+button.invRow.skipped .invLoc{text-decoration:none;font-style:italic}
 button.invRow.skipped .invStat{color:#8b786c;font-style:italic;font-weight:600;text-decoration:none}
 .invSec .invRow:first-of-type{border-top:0}
 @media (hover:hover){

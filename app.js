@@ -36,6 +36,54 @@ const itemDecimal=i=>!i||i.allowDecimal!==false;
 const itemCount2=i=>String(i&&i.count2Label||'').trim();
 const itemLoc=i=>{const v=i&&i.location;return typeof v==='string'?v.trim():''};
 const itemCount2Loc=i=>{const v=i&&i.count2Location;return typeof v==='string'?v.trim():''};
+// One suggestion list for both place fields: saved location and count2Location values, trimmed,
+// blanks dropped, case-insensitive duplicates collapsed to the first spelling, then A–Z.
+function locationChoices(){
+ const seen=new Map();
+ const add=v=>{if(typeof v!=='string')return;const t=v.trim();if(!t)return;const k=t.toLowerCase();if(!seen.has(k))seen.set(k,t)};
+ for(const h of S.headers)for(const it of h.items||[]){add(it.location);add(it.count2Location)}
+ return [...seen.values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base',numeric:true}));
+}
+function bindLocSuggest(input){
+ const list=document.createElement('div');list.className='suggestList';list.hidden=true;list.setAttribute('role','listbox');
+ input.insertAdjacentElement('afterend',list);
+ input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');input.setAttribute('aria-controls',input.id+'List');
+ list.id=input.id+'List';
+ let hi=-1,base='';
+ const close=()=>{list.hidden=true;list.innerHTML='';hi=-1;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant')};
+ const hits=()=>{
+  const q=input.value.trim().toLowerCase(),all=locationChoices();
+  if(q===base)return all.filter(s=>s.toLowerCase()!==q); // focused text unchanged: the other saved places
+  return all.filter(s=>{const k=s.toLowerCase();return k!==q&&k.includes(q)});
+ };
+ const paint=()=>{
+  const rows=hits();
+  if(!rows.length){close();return}
+  if(hi>=rows.length)hi=-1;
+  list.hidden=false;input.setAttribute('aria-expanded','true');
+  list.innerHTML=rows.map((s,n)=>`<button type="button" role="option" id="${input.id}o${n}" aria-selected="${n===hi?'true':'false'}">${esc(s)}</button>`).join('');
+  if(hi>=0)input.setAttribute('aria-activedescendant',input.id+'o'+hi);else input.removeAttribute('aria-activedescendant');
+  requestAnimationFrame(()=>{
+   const body=input.closest('.sheetBody');if(!body)return;
+   const vv=window.visualViewport;const limit=(vv?vv.offsetTop+vv.height:window.innerHeight)-8;
+   const over=list.getBoundingClientRect().bottom-limit;
+   if(over>0)body.scrollTop+=over;
+  });
+ };
+ const pick=s=>{input.value=s;close();input.dispatchEvent(new Event('input',{bubbles:true}));input.focus()};
+ input.addEventListener('focus',()=>{base=input.value.trim().toLowerCase();hi=-1;paint()});
+ input.addEventListener('input',()=>{hi=-1;paint()});
+ input.addEventListener('keydown',e=>{
+  if(list.hidden)return;
+  const n=list.children.length;
+  if(e.key==='ArrowDown'){e.preventDefault();hi=hi<0?0:(hi+1)%n;paint()}
+  else if(e.key==='ArrowUp'){e.preventDefault();hi=hi<0?n-1:(hi-1+n)%n;paint()}
+  else if(e.key==='Enter'&&hi>=0){e.preventDefault();pick(list.children[hi].textContent)}
+  else if(e.key==='Escape'){e.stopPropagation();e.preventDefault();close()}
+ });
+ list.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(!b)return;e.preventDefault();pick(b.textContent)});
+ input.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==input&&!list.contains(document.activeElement))close()},160));
+}
 let onSheetKey=null;
 function closeSheet(){
  const el=document.getElementById('sheetBack');if(el)el.remove();
@@ -118,9 +166,10 @@ function openItemSheet(o){
  const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'',loc2=lab?itemCount2Loc(cur):'';
  const place=isEdit?itemLoc(cur):''; // older items have no location; the box stays blank
  const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
- const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">Category<select id="shCat">${opts}</select></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield"><span>Location <span class="muted opt">optional</span></span><input id="shLoc" type="text" autocomplete="off" placeholder="walk-in, bar fridge" value="${esc(place)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">Category<select id="shCat">${opts}</select></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield"><span>Location <span class="muted opt">optional</span></span><input id="shLoc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, bar fridge" value="${esc(place)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),locI=form.querySelector('#shC2loc'),err=form.querySelector('#shErr');
+ bindLocSuggest(form.querySelector('#shLoc'));bindLocSuggest(locI);
  form.addEventListener('input',()=>{err.textContent=''});
  const revealC2=()=>requestAnimationFrame(()=>{if(!c2.checked)return;const over=locI.getBoundingClientRect().bottom-form.querySelector('.sheetFoot').getBoundingClientRect().top+8;if(over>0)form.querySelector('.sheetBody').scrollTop+=over});
  c2.onchange=()=>{const on=c2.checked;wrap.hidden=!on;note.hidden=!on;err.textContent='';if(!on){labI.value='';locI.value=''}else{labI.focus();revealC2()}};

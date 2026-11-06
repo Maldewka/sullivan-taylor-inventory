@@ -108,13 +108,25 @@ function openCountSheet(id){
  const first=form.querySelector('#shCount');
  setTimeout(()=>{if(first&&!first.disabled)first.focus();else form.querySelector('#shSkip').focus()},0);
 }
+// Primary location is free text and is the inventory section name. Match a header by trimmed,
+// case-insensitive name, or create one. preferGi stays put when that header already has the typed name.
+function headerForLocation(name,preferGi){
+ const trimmed=String(name==null?'':name).trim(),key=trimmed.toLowerCase();
+ if(!key)return -1;
+ const same=i=>String((S.headers[i]&&S.headers[i].name)||'').trim().toLowerCase()===key;
+ if(preferGi>=0&&same(preferGi))return preferGi;
+ const i=S.headers.findIndex((_,n)=>same(n));
+ if(i>=0)return i;
+ S.headers.push({id:uid(),name:trimmed,items:[]});
+ return S.headers.length-1;
+}
 function openItemSheet(o){
  const isEdit=o.mode==='edit',gi=o.gi,ii=isEdit?o.ii:-1;
  const cur=isEdit?(S.headers[gi]&&S.headers[gi].items[ii]):null;
  if(isEdit&&!cur)return;
  const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'',loc2=lab?itemCount2Loc(cur):'';
- const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
- const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield">Location<select id="shLoc">${opts}</select></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const locName=String((S.headers[gi]&&S.headers[gi].name)||''); // older items have no location field; the header name is the place
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield">Location<input id="shLoc" type="text" autocomplete="off" placeholder="walk-in, bar fridge" value="${esc(locName)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),locI=form.querySelector('#shC2loc'),err=form.querySelector('#shErr');
  form.addEventListener('input',()=>{err.textContent=''});
@@ -133,11 +145,12 @@ function openItemSheet(o){
   if(Number.isNaN(cost)){err.textContent='Cost must be a dollar amount, like 4.50.';return}
   const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim();
   if(want2&&!label){err.textContent='Name the second count, like bags or cases, or turn it off.';return}
-  const toGi=+form.querySelector('#shLoc').value;
-  if(!S.headers[toGi]){err.textContent='Choose a location.';return}
+  const now=isEdit?locateItem(cur.id):null;
+  if(isEdit&&!now){err.textContent='That item is no longer in the database.';return}
+  const toGi=headerForLocation(form.querySelector('#shLoc').value,isEdit?now.gi:gi);
+  if(toGi<0){err.textContent='Enter a location.';form.querySelector('#shLoc').focus();return}
   const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
   if(isEdit){
-   const now=locateItem(cur.id);if(!now){err.textContent='That item is no longer in the database.';return}
    write(now.item);
    if(toGi!==now.gi){S.headers[now.gi].items.splice(now.ii,1);S.headers[toGi].items.push(now.item)}
   }else{

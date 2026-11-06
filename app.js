@@ -13,31 +13,162 @@ S=load();
 const V=document.getElementById('view');
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset.tab!==tab)reorderMode=false;tab=b.dataset.tab;histSel=null;render()});
 let printMode=false; // on-screen print-friendly view (not persisted)
-function render(){document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
+function render(){closeSheet();document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
 // snapshot helpers
-function freeze(counts,skipped={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>skipped[i.id]?{name:i.name,par:i.par,count:null,skipped:true}:{name:i.name,par:i.par,count:counts[i.id]??null})}))}
+// Primary count is the only number that feeds below-par, the Order List, and Overhead.
+// count2 / count2Label are kept for reference when an item is counted in a second unit.
+function freeze(counts,skipped={},counts2={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>{
+ const label=String(i.count2Label||'').trim();
+ if(skipped[i.id]){const row={name:i.name,par:i.par,count:null,skipped:true};if(label)row.count2Label=label;return row}
+ const row={name:i.name,par:i.par,count:counts[i.id]??null};
+ if(label){row.count2Label=label;row.count2=counts2[i.id]??null}
+ return row})}))}
 function shortList(groups){return groups.map(g=>({name:g.name,items:g.items.filter(i=>!i.skipped&&i.count!==null&&i.count<i.par).map(i=>({...i,need:Math.ceil(+(i.par-i.count).toFixed(6))}))})).filter(g=>g.items.length)}
 function latest(){return S.snapshots[S.snapshots.length-1]}
+// allowDecimal false = whole units. Missing keeps the old decimal number-input behavior.
+// count2Label empty/missing = a single count. Ordering never uses the second count.
+const itemDecimal=i=>!i||i.allowDecimal!==false;
+const itemCount2=i=>String(i&&i.count2Label||'').trim();
+let onSheetKey=null;
+function closeSheet(){
+ const el=document.getElementById('sheetBack');if(el)el.remove();
+ document.body.classList.remove('sheetOpen');
+ const app=document.getElementById('app');if(app)app.inert=false;
+ if(onSheetKey){document.removeEventListener('keydown',onSheetKey);onSheetKey=null}
+}
+function mountSheet(html){
+ closeSheet();
+ const back=document.createElement('div');back.id='sheetBack';back.className='sheetBack';back.innerHTML=html;
+ document.body.appendChild(back);document.body.classList.add('sheetOpen');
+ const app=document.getElementById('app');if(app)app.inert=true;
+ back.addEventListener('click',e=>{if(e.target===back)closeSheet()});
+ onSheetKey=e=>{if(e.key==='Escape'){e.preventDefault();closeSheet()}};
+ document.addEventListener('keydown',onSheetKey);
+ return back;
+}
+function locateItem(id){
+ for(let gi=0;gi<S.headers.length;gi++){const ii=S.headers[gi].items.findIndex(x=>x.id===id);if(ii>=0)return{gi,ii,header:S.headers[gi],item:S.headers[gi].items[ii]}}
+ return null;
+}
+function readCount(raw,dec){
+ raw=String(raw==null?'':raw).trim().replace(/\.$/,'');
+ if(raw==='')return null;
+ if(!/^\d+(\.\d+)?$/.test(raw))return NaN;
+ const n=Number(raw);
+ if(!isFinite(n)||n<0)return NaN;
+ if(!dec&&!Number.isInteger(n))return NaN;
+ return dec?Math.round(n*1000)/1000:n;
+}
+function nudge(input,dir,dec){
+ const cur=readCount(input.value,true);
+ let n=Number.isNaN(cur)?null:cur;
+ if(n===null){if(dir<0){input.value='';return}n=0}
+ n+=dir;if(n<0)n=0;
+ if(!dec)n=Math.round(n);else n=Math.round(n*1000)/1000;
+ input.value=String(n);
+}
+function stepHtml(label,id,val,dec){
+ const shown=val==null?'':String(val);
+ return `<div class="stepRow"><span class="stepLbl">${esc(label)}</span><button type="button" class="stepBtn" data-for="${id}" data-dir="-1" aria-label="Decrease ${esc(label)}">−</button><input id="${id}" class="stepVal" inputmode="${dec?'decimal':'numeric'}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" value="${esc(shown)}" aria-label="${esc(label)}"><button type="button" class="stepBtn" data-for="${id}" data-dir="1" aria-label="Increase ${esc(label)}">+</button></div>`;
+}
+function openCountSheet(id){
+ const loc=locateItem(id);if(!loc||!S.draft)return;
+ const d=S.draft;d.counts=d.counts||{};d.counts2=d.counts2||{};d.skipped=d.skipped||{};
+ const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),sk=!!d.skipped[id];
+ const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">PAR ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec):''}<div class="sheetLoc">Location: ${esc(loc.header.name)}</div></div><div class="sheetFoot"><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
+ const form=back.querySelector('form');
+ const applySkip=on=>{
+  const b=form.querySelector('#shSkip');
+  b.classList.toggle('skipOn',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Unskip':'Skip';
+  form.querySelectorAll('.stepRow').forEach(r=>r.classList.toggle('off',on));
+  form.querySelectorAll('.stepBtn,.stepVal').forEach(el=>{el.disabled=on});
+ };
+ applySkip(sk);
+ form.querySelector('#shSkip').onclick=()=>applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');
+ form.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>nudge(form.querySelector('#'+b.dataset.for),+b.dataset.dir,dec));
+ form.querySelector('#shCancel').onclick=()=>closeSheet();
+ form.onsubmit=e=>{
+  e.preventDefault();
+  const err=form.querySelector('#shErr');err.textContent='';
+  if(form.querySelector('#shSkip').getAttribute('aria-pressed')==='true'){d.skipped[id]=true;delete d.counts[id];delete d.counts2[id];save();render();return}
+  const e1=form.querySelector('#shCount'),e2=form.querySelector('#shCount2');
+  const n1=readCount(e1.value,dec),n2=e2?readCount(e2.value,dec):null;
+  if(Number.isNaN(n1)||Number.isNaN(n2)){err.textContent=dec?'Enter a number that is 0 or more.':'Enter a whole number, 0 or more.';(Number.isNaN(n1)?e1:e2).focus();return}
+  delete d.skipped[id];
+  if(n1===null)delete d.counts[id];else d.counts[id]=n1;
+  if(lab){if(n2===null)delete d.counts2[id];else d.counts2[id]=n2}else delete d.counts2[id];
+  save();render();
+ };
+ const first=form.querySelector('#shCount');
+ setTimeout(()=>{if(first&&!first.disabled)first.focus();else form.querySelector('#shSkip').focus()},0);
+}
+function openItemSheet(o){
+ const isEdit=o.mode==='edit',gi=o.gi,ii=isEdit?o.ii:-1;
+ const cur=isEdit?(S.headers[gi]&&S.headers[gi].items[ii]):null;
+ if(isEdit&&!cur)return;
+ const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'';
+ const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield">Location<select id="shLoc">${opts}</select></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><label class="afield" id="shC2wrap"${lab?'':' hidden'}>Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const form=back.querySelector('form');
+ const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),err=form.querySelector('#shErr');
+ form.addEventListener('input',()=>{err.textContent=''});
+ c2.onchange=()=>{const on=c2.checked;wrap.hidden=!on;note.hidden=!on;err.textContent='';if(on)labI.focus()};
+ form.querySelector('#shCancel').onclick=()=>closeSheet();
+ form.onsubmit=e=>{
+  e.preventDefault();
+  err.textContent='';
+  const nm=form.querySelector('#shName').value.trim();
+  if(!nm){err.textContent='Enter a name.';return}
+  const parRaw=form.querySelector('#shPar').value.trim();
+  const par=parRaw===''?0:Number(parRaw);
+  if(!isFinite(par)||par<0){err.textContent='PAR must be a number that is 0 or more.';return}
+  const cost=parseCost(form.querySelector('#shCost').value);
+  if(Number.isNaN(cost)){err.textContent='Cost must be a dollar amount, like 4.50.';return}
+  const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim();
+  if(want2&&!label){err.textContent='Name the second count, like bags or cases, or turn it off.';return}
+  const toGi=+form.querySelector('#shLoc').value;
+  if(!S.headers[toGi]){err.textContent='Choose a location.';return}
+  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(want2)it.count2Label=label;else{delete it.count2Label;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
+  if(isEdit){
+   const now=locateItem(cur.id);if(!now){err.textContent='That item is no longer in the database.';return}
+   write(now.item);
+   if(toGi!==now.gi){S.headers[now.gi].items.splice(now.ii,1);S.headers[toGi].items.push(now.item)}
+  }else{
+   const it={id:uid(),name:nm,par,allowDecimal:allow};
+   if(cost!==null)it.cost=cost;
+   if(want2)it.count2Label=label;
+   S.headers[toGi].items.push(it);
+  }
+  save();render();
+ };
+ setTimeout(()=>{const p=form.querySelector('#shPar');p.focus();if(isEdit)p.select()},30);
+}
 // INVENTORY
 function inventory(){
  if(!S.headers.some(h=>h.items.length)){V.innerHTML=`<div class="card empty">No items yet. Add headers and items in the <b>Database</b> tab.</div>`;return}
- if(!S.draft)S.draft={id:uid(),started:new Date().toISOString(),counts:{}};
- const d=S.draft;d.skipped=d.skipped||{};
+ if(!S.draft)S.draft={id:uid(),started:new Date().toISOString(),counts:{},counts2:{}};
+ const d=S.draft;d.skipped=d.skipped||{};d.counts=d.counts||{};d.counts2=d.counts2||{};
  let h=`<div class="bar"><div style="flex:1"><b>Count date:</b> <input type="date" id="cdate" value="${d.date||today()}"> <span class="muted">started ${fmt(d.started)}</span></div>
  <button id="saveCount">Save count</button><button class="light" id="newCount">New count</button><span class="muted lastSaved">${lastSavedText()}</span></div>`;
- for(const g of S.headers){if(!g.items.length)continue;h+=`<div class="card"><h3 class="ghead">${esc(g.name)}</h3>`;
-  for(const i of g.items){const c=d.counts[i.id],sk=!!d.skipped[i.id];h+=`<div class="item${sk?' skipped':''}" data-item="${i.id}"><div class="name">${esc(i.name)}<div class="muted">${sk?'Skipped this week':'PAR '+i.par}</div></div>
-  <input type="number" inputmode="decimal" step="any" min="0" data-id="${i.id}" value="${sk?'':c??''}" placeholder="${sk?'—':'count'}" ${sk?'disabled':''} aria-label="count ${esc(i.name)}"><button class="light sm skipBtn" data-id="${i.id}" aria-pressed="${sk}">${sk?'Unskip':'Skip'}</button></div>`}
-  h+=`</div>`}
+ for(const g of S.headers){if(!g.items.length)continue;
+  h+=`<section class="card invSec" data-header="${esc(g.name)}"><h3 class="ghead invSticky">${esc(g.name)}</h3>`;
+  for(const i of g.items){
+   const sk=!!d.skipped[i.id],c=d.counts[i.id],has=c!=null&&!sk;
+   const cls=sk?'skipped':has?'counted':'uncounted';
+   let stat='';
+   if(sk)stat='Skipped';
+   else if(has){stat=String(c);const c2lab=itemCount2(i),c2=d.counts2[i.id];if(c2lab&&c2!=null)stat+=' · '+c2+' '+c2lab}
+   const aria=sk?'Skipped '+i.name:has?i.name+', '+stat:'Count '+i.name;
+   h+=`<button type="button" class="item invRow ${cls}" data-id="${esc(i.id)}" data-state="${cls}" aria-label="${esc(aria)}"><span class="name">${esc(i.name)}</span><span class="invStat">${esc(stat)}</span></button>`}
+  h+=`</section>`}
  V.innerHTML=h;
- V.querySelectorAll('input[type=number]').forEach(inp=>inp.oninput=()=>{const v=inp.value===''?null:Number(inp.value);if(v===null)delete d.counts[inp.dataset.id];else d.counts[inp.dataset.id]=v;save()});
- V.querySelectorAll('.skipBtn').forEach(b=>b.onclick=()=>{const id=b.dataset.id;if(d.skipped[id])delete d.skipped[id];else{d.skipped[id]=true;delete d.counts[id]}save();render()});
+ V.querySelectorAll('.invRow').forEach(b=>b.onclick=()=>openCountSheet(b.dataset.id));
  cdate.onchange=()=>{d.date=cdate.value;save()};
  saveCount.onclick=()=>{const blanks=S.headers.flatMap(g=>g.items).filter(i=>!d.skipped[i.id]&&d.counts[i.id]==null).map(i=>i.name);
   if(blanks.length){const counted=Object.keys(d.counts).length;const list=blanks.slice(0,8).map(n=>'• '+n).join('\n')+(blanks.length>8?`\n+${blanks.length-8} more`:'');
    if(!confirm((counted?'These items have no count:\n':'No counts entered. These items have no count:\n')+list+'\n\nSave anyway?'))return}
-  {const dt=d.date||today();const snap={id:d.id,date:dt,savedAt:new Date().toISOString(),groups:freeze(d.counts,d.skipped)};const ix=S.snapshots.findIndex(x=>x.date===dt);if(ix>=0){snap.id=S.snapshots[ix].id;S.snapshots.splice(ix,1)}S.snapshots.push(snap)}S.draft=null;save();tab='orders';render()};
- newCount.onclick=()=>{const has=Object.keys(d.counts).length||Object.keys(d.skipped).length;if(has&&!confirm('Discard the unsaved count and start a new one?'))return;S.draft=null;S.ordersClearedAt=new Date().toISOString();save();render();toast('New count started. Order List cleared.')};
+  {const dt=d.date||today();const snap={id:d.id,date:dt,savedAt:new Date().toISOString(),groups:freeze(d.counts,d.skipped,d.counts2)};const ix=S.snapshots.findIndex(x=>x.date===dt);if(ix>=0){snap.id=S.snapshots[ix].id;S.snapshots.splice(ix,1)}S.snapshots.push(snap)}S.draft=null;save();tab='orders';render()};
+ newCount.onclick=()=>{const has=Object.keys(d.counts).length||Object.keys(d.counts2).length||Object.keys(d.skipped).length;if(has&&!confirm('Discard the unsaved count and start a new one?'))return;S.draft=null;S.ordersClearedAt=new Date().toISOString();save();render();toast('New count started. Order List cleared.')};
 }
 function lastSavedText(){const t=S.snapshots.map(x=>x.savedAt).filter(Boolean).sort().pop();if(!t)return 'Not saved yet';const d=new Date(t);return 'Last saved '+d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+', '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}
 function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.classList.add('show');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('show'),2600)}
@@ -46,7 +177,7 @@ function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s
  V.innerHTML=`<p class="muted">From count on <b>${s.date}</b> (saved ${fmt(s.savedAt)})</p>`+orderHtml(s)}
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
  return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
-function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?'<span class="muted">Not counted</span>':`<b>${i.count}</b>`}</div>`}).join('')+`</div>`).join('')}
+function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=i.count2Label&&i.count2!=null?` <span class="muted">· ${esc(i.count2)} ${esc(i.count2Label)}</span>`:'';return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
 const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
@@ -158,13 +289,13 @@ function database(){
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;
-  g.items.forEach((i,ii)=>{h+=`<div class="item dbItem"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name"><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label>
-   <button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
+  g.items.forEach((i,ii)=>{const c2=itemCount2(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${c2?`<div class="muted dbC2">Also count ${esc(c2)}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
  q('.hsw button').forEach(b=>b.onclick=()=>{const k=b.dataset.hs;const set=HS.split(' ').filter(x=>x&&x!==k);if(!hsOn(k))set.push(k);HS=set.sort().join(' ');localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});
  addH.onclick=()=>{const n=prompt('Header name (e.g. Coffee, Non-food):');if(n&&n.trim()){S.headers.push({id:uid(),name:n.trim(),items:[]});save();render()}};
- q('.addI').forEach(b=>b.onclick=()=>{const g=S.headers[b.dataset.g];const n=prompt(`New item under “${g.name}”:`);if(!n||!n.trim())return;const p=prompt('PAR (required stock level):','');g.items.push({id:uid(),name:n.trim(),par:Math.max(0,Number(p)||0)});save();render()});
+ q('.addI').forEach(b=>b.onclick=()=>{const gi=+b.dataset.g,g=S.headers[gi];const n=prompt(`New item under “${g.name}”:`);if(!n||!n.trim())return;openItemSheet({mode:'add',gi,name:n.trim()})});
+ q('.dbEdit').forEach(b=>b.onclick=()=>openItemSheet({mode:'edit',gi:+b.dataset.g,ii:+b.dataset.i}));
  q('.hname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].name=e.value.trim()||'Untitled';save()});
  q('.iname').forEach(e=>e.onchange=()=>{S.headers[e.dataset.g].items[e.dataset.i].name=e.value.trim()||'Untitled';save()});
  q('.icost').forEach(e=>e.onchange=()=>{const it=S.headers[e.dataset.g].items[e.dataset.i],c=parseCost(e.value);

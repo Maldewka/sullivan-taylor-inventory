@@ -244,6 +244,40 @@ button.stepBtn:active{background:#3b2a20}
 .stepRow.off{opacity:.4}
 .sheetLoc{margin:12px 0 4px;padding:12px 14px;border:1px solid #d6c8bc;border-radius:12px;background:#f6f2ee;color:#5b3a29;font-weight:700}
 .sheetC2Loc{margin:-4px 0 4px;padding:8px 14px;border:1px solid #e4d5c8;border-radius:12px;background:#fbf7f4;color:#6d5a4f;font-weight:600;overflow-wrap:anywhere}
+.fracBar+.sheetC2Loc{margin-top:0}
+
+/* Phone: lists and cards on every tab run to the screen edges. Inner padding keeps the text in. */
+@media(max-width:480px){
+ main{max-width:none;padding:8px 0 20px}
+ main>.muted,main>.bar,main>.histHead,main>p,main>.overhead>.bar,main>.overhead>.ohRange{padding-left:16px;padding-right:16px}
+ main .card,main .hist,main .vHead,main .forYouCard{border-radius:0}
+ /* Database toolbar: one row. Visible buttons are short; the hit area stays about 36px. */
+ .dbBar,main>.dbBar{flex-wrap:nowrap;gap:0;align-items:center;justify-content:space-evenly;margin-bottom:10px;padding-left:0;padding-right:0}
+ .dbBar .dbSpacer,.dbBar .hsLbl{display:none}
+ .dbBar .hsw{display:inline-flex;align-items:center;gap:8px}
+ .dbBar #addH,.dbBar .reorderBtn,.dbBar .hsw button{position:relative;flex:0 0 auto;min-width:0;height:26px;min-height:26px;padding:0 8px;font-size:12px;line-height:1;font-weight:600;letter-spacing:0;white-space:nowrap}
+ .dbBar #addH::after,.dbBar .reorderBtn::after,.dbBar .hsw button::after{content:"";position:absolute;left:0;right:0;top:-5px;bottom:-5px}
+ .hrow.ghead{flex-wrap:nowrap}
+ .hrow.ghead input.hname{flex:1 1 auto;min-height:0;height:36px}
+ .hrow.ghead .addI{flex:none}
+}
+
+/* Database category row: a slim part of the list, not a boxed toolbar.
+   Border swaps the copper rule for an outline. Tint lays a tan band behind it. */
+.hrow.ghead{gap:4px;align-items:center;margin:0 -14px 0;padding:2px 14px;min-height:0;border:0;border-bottom:2px solid #c9864a;border-radius:0;background:transparent;box-shadow:none}
+.hrow.ghead input.hname{flex:1 1 auto;width:auto;min-width:0;min-height:0;height:36px;border:0;border-radius:8px;background:transparent;padding:0 2px;text-align:left;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.15rem;line-height:1;letter-spacing:.02em;color:#5b3a29}
+.hrow.ghead input.hname:focus{outline:2px solid #c9864a;background:rgba(255,253,251,.8)}
+.hrow.ghead button{flex:none;width:36px;min-width:36px;height:36px;min-height:36px;padding:0;border-radius:8px;background:transparent;color:#8a5a3c;font-size:1.05rem;font-weight:650;box-shadow:none}
+.hrow.ghead button.delH{color:#b3402f}
+.hrow.ghead button.addI{width:auto;min-width:0;height:26px;min-height:26px;padding:0 10px;border:1px solid #c9864a;border-radius:999px;background:#f6efe6;color:#5b3a29;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;font-weight:650;line-height:1;letter-spacing:0;position:relative}
+.hrow.ghead button.addI::after{content:"";position:absolute;left:-6px;right:-6px;top:-5px;bottom:-5px}
+.hrow.ghead button.addI:active{background:#efe4d8}
+.hrow.ghead button:active{background:rgba(201,134,74,.22)}
+.card>.hrow.ghead+.item{border-top:0;padding-top:6px}
+.card>.hrow.ghead+.muted{padding-top:6px}
+/* Database headers stay the plain copper rule. Border and Tint still style Inventory and History .ghead. */
+body[data-hs~=border] .hrow.ghead,body[data-hs~=tint] .hrow.ghead{background:transparent;border:0;border-bottom:2px solid #c9864a;border-radius:0;box-shadow:none}
+body[data-hs~=tint] .hrow.ghead input.hname,body[data-hs~=border] .hrow.ghead input.hname{border-color:transparent;background:transparent}
 .sheet .afield .opt{font-weight:500;font-size:.82rem}
 .suggestList{display:flex;flex-direction:column;margin-top:4px;padding:4px;background:#fffdfb;border:1px solid #d6c8bc;border-radius:10px;box-shadow:0 6px 16px rgba(43,33,28,.08);max-height:176px;overflow:auto}
 .suggestList button{width:100%;min-height:44px;background:transparent;color:#2b211c;border-radius:8px;justify-content:flex-start;font-weight:500;padding:0 12px;text-align:left;touch-action:manipulation;box-shadow:none}

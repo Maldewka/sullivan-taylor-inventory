@@ -272,9 +272,9 @@ button.stepBtn:active{background:#3b2a20}
 .hrow.ghead button:active{background:rgba(201,134,74,.22)}
 .card>.hrow.ghead+.item{border-top:0;padding-top:6px}
 .card>.hrow.ghead+.muted{padding-top:6px}
-body[data-hs~=border] .hrow.ghead{border:2px solid #c9864a;border-radius:10px}
-body[data-hs~=tint] .hrow.ghead{background:#e9d8c8}
-body[data-hs~=tint] .hrow.ghead input.hname{background:transparent}
+/* Database headers stay the plain copper rule. Border and Tint still style Inventory and History .ghead. */
+body[data-hs~=border] .hrow.ghead,body[data-hs~=tint] .hrow.ghead{background:transparent;border:0;border-bottom:2px solid #c9864a;border-radius:0;box-shadow:none}
+body[data-hs~=tint] .hrow.ghead input.hname,body[data-hs~=border] .hrow.ghead input.hname{border-color:transparent;background:transparent}
 .sheet .afield .opt{font-weight:500;font-size:.82rem}
 .suggestList{display:flex;flex-direction:column;margin-top:4px;padding:4px;background:#fffdfb;border:1px solid #d6c8bc;border-radius:10px;box-shadow:0 6px 16px rgba(43,33,28,.08);max-height:176px;overflow:auto}
 .suggestList button{width:100%;min-height:44px;background:transparent;color:#2b211c;border-radius:8px;justify-content:flex-start;font-weight:500;padding:0 12px;text-align:left;touch-action:manipulation;box-shadow:none}

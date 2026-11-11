@@ -15,36 +15,65 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset
 let printMode=false; // on-screen print-friendly view (not persisted)
 function render(){closeSheet();document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
 // snapshot helpers
-// Primary count is the only number that feeds below-par, the Order List, and Overhead.
-// count2 / count2Label are kept for reference when an item is counted in a second unit.
+// On-hand for ordering is the primary count plus the second count. count2Label is a name only
+// (a place, bags, cases); the app does not convert units, so the two numbers are added as entered.
+// A blank side counts as 0 when the other side has a number. Both blank, or a skipped item, is not counted.
 // location is where the item sits in the store. count2Location is the place for the second count.
-// Both are optional free text. Neither is a catalog header. Missing or blank means none.
+// vendor is the optional supplier. All three are optional free text. None is a catalog header.
+// Missing or blank means none. A leftover halfStep on an old item is ignored.
 function freeze(counts,skipped={},counts2={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>{
  const label=String(i.count2Label||'').trim();
- const loc2=itemCount2Loc(i),place=itemLoc(i);
- const stamp=row=>{if(place)row.location=place;if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}return row};
+ const loc2=itemCount2Loc(i),place=itemLoc(i),vend=itemVendor(i);
+ const stamp=row=>{if(place)row.location=place;if(vend)row.vendor=vend;if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}return row};
  if(skipped[i.id])return stamp({name:i.name,par:i.par,count:null,skipped:true});
  const row=stamp({name:i.name,par:i.par,count:counts[i.id]??null});
  if(label)row.count2=counts2[i.id]??null;
  return row})}))}
-function shortList(groups){return groups.map(g=>({name:g.name,items:g.items.filter(i=>!i.skipped&&i.count!==null&&i.count<i.par).map(i=>({...i,need:Math.ceil(+(i.par-i.count).toFixed(6))}))})).filter(g=>g.items.length)}
+function orderNeed(par,count){return Math.ceil(+(par-count).toFixed(6))} // same shortfall the Order List and Overhead use
+function qtyNum(v){if(typeof v==='number')return isFinite(v)?v:null;if(v==null||v==='')return null;const n=Number(v);return isFinite(n)?n:null}
+function onHandOf(i){ // null = not counted. Otherwise primary + second, with one blank side treated as 0.
+ if(!i||i.skipped)return null;
+ const secondLabel=String(i.count2Label||'').trim();
+ const primary=qtyNum(i.count),second=secondLabel?qtyNum(i.count2):null;
+ if(primary==null&&second==null)return null;
+ return Math.round(((primary==null?0:primary)+(second==null?0:second))*1000)/1000;
+}
+function shortList(groups){return (groups||[]).map(g=>({name:g.name,items:(g.items||[]).filter(i=>{const have=onHandOf(i);return have!=null&&have<i.par}).map(i=>{const have=onHandOf(i);return {...i,have,need:orderNeed(i.par,have)}})})).filter(g=>g.items.length)}
 function latest(){return S.snapshots[S.snapshots.length-1]}
 // allowDecimal false = whole units. Missing keeps the old decimal number-input behavior.
-// count2Label empty/missing = a single count. Ordering never uses the second count.
-// location and count2Location are optional free text. Non-strings and blanks are unset so older items load cleanly.
+// count2Label empty/missing = a single count. A label does not change the unit; ordering adds the numbers.
+// location, count2Location, and vendor are optional free text. Non-strings and blanks are unset so older items load cleanly.
+// Steppers always move by 1. A fraction slider, only for decimal items, edits the tenths.
 const itemDecimal=i=>!i||i.allowDecimal!==false;
 const itemCount2=i=>String(i&&i.count2Label||'').trim();
 const itemLoc=i=>{const v=i&&i.location;return typeof v==='string'?v.trim():''};
 const itemCount2Loc=i=>{const v=i&&i.count2Location;return typeof v==='string'?v.trim():''};
-// One suggestion list for both place fields: saved location and count2Location values, trimmed,
-// blanks dropped, case-insensitive duplicates collapsed to the first spelling, then A–Z.
-function locationChoices(){
+const itemVendor=i=>{const v=i&&i.vendor;return typeof v==='string'?v.trim():''};
+// Order List prefers the vendor currently saved on the matching Database item, so a correction shows up
+// before the next count. A line whose item is gone keeps the vendor stored on that saved count.
+function vendorForLine(groupName,snapItem){
+ for(const h of S.headers)if(h.name===groupName)for(const it of h.items||[])if(it.name===snapItem.name)return itemVendor(it);
+ return itemVendor(snapItem);
+}
+function uniqueSorted(vals){
  const seen=new Map();
- const add=v=>{if(typeof v!=='string')return;const t=v.trim();if(!t)return;const k=t.toLowerCase();if(!seen.has(k))seen.set(k,t)};
- for(const h of S.headers)for(const it of h.items||[]){add(it.location);add(it.count2Location)}
+ for(const v of vals){if(typeof v!=='string')continue;const t=v.trim();if(!t)continue;const k=t.toLowerCase();if(!seen.has(k))seen.set(k,t)}
  return [...seen.values()].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base',numeric:true}));
 }
-function bindLocSuggest(input){
+// Saved place names: location and count2Location, trimmed, blanks dropped,
+// case-insensitive duplicates collapsed to the first spelling, then A–Z.
+function locationChoices(){
+ const vals=[];
+ for(const h of S.headers)for(const it of h.items||[]){vals.push(it.location);vals.push(it.count2Location)}
+ return uniqueSorted(vals);
+}
+// Previously used vendor names, same rules as places. Locations are not vendors.
+function vendorChoices(){
+ const vals=[];
+ for(const h of S.headers)for(const it of h.items||[])vals.push(it.vendor);
+ return uniqueSorted(vals);
+}
+function bindSuggest(input,choicesFn){
  const list=document.createElement('div');list.className='suggestList';list.hidden=true;list.setAttribute('role','listbox');
  input.insertAdjacentElement('afterend',list);
  input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');input.setAttribute('aria-expanded','false');input.setAttribute('aria-controls',input.id+'List');
@@ -52,8 +81,8 @@ function bindLocSuggest(input){
  let hi=-1,base='';
  const close=()=>{list.hidden=true;list.innerHTML='';hi=-1;input.setAttribute('aria-expanded','false');input.removeAttribute('aria-activedescendant')};
  const hits=()=>{
-  const q=input.value.trim().toLowerCase(),all=locationChoices();
-  if(q===base)return all.filter(s=>s.toLowerCase()!==q); // focused text unchanged: the other saved places
+  const q=input.value.trim().toLowerCase(),all=choicesFn();
+  if(q===base)return all.filter(s=>s.toLowerCase()!==q); // focused text unchanged: the other saved names
   return all.filter(s=>{const k=s.toLowerCase();return k!==q&&k.includes(q)});
  };
  const paint=()=>{
@@ -65,7 +94,10 @@ function bindLocSuggest(input){
   if(hi>=0)input.setAttribute('aria-activedescendant',input.id+'o'+hi);else input.removeAttribute('aria-activedescendant');
   requestAnimationFrame(()=>{
    const body=input.closest('.sheetBody');if(!body)return;
-   const vv=window.visualViewport;const limit=(vv?vv.offsetTop+vv.height:window.innerHeight)-8;
+   const sheet=input.closest('.sheet'),foot=sheet&&sheet.querySelector('.sheetFoot');
+   const vv=window.visualViewport;
+   const viewBottom=(vv?vv.offsetTop+vv.height:window.innerHeight)-8;
+   const limit=foot?Math.min(foot.getBoundingClientRect().top-8,viewBottom):viewBottom;
    const over=list.getBoundingClientRect().bottom-limit;
    if(over>0)body.scrollTop+=over;
   });
@@ -84,10 +116,12 @@ function bindLocSuggest(input){
  list.addEventListener('pointerdown',e=>{const b=e.target.closest('button');if(!b)return;e.preventDefault();pick(b.textContent)});
  input.addEventListener('blur',()=>setTimeout(()=>{if(document.activeElement!==input&&!list.contains(document.activeElement))close()},160));
 }
+function bindLocSuggest(input){bindSuggest(input,locationChoices)}
+function bindVendorSuggest(input){bindSuggest(input,vendorChoices)}
 let onSheetKey=null;
 function closeSheet(){
  const el=document.getElementById('sheetBack');if(el)el.remove();
- document.body.classList.remove('sheetOpen');
+ document.body.classList.remove('sheetOpen','fracDrag');
  const app=document.getElementById('app');if(app)app.inert=false;
  if(onSheetKey){document.removeEventListener('keydown',onSheetKey);onSheetKey=null}
 }
@@ -114,11 +148,11 @@ function readCount(raw,dec){
  if(!dec&&!Number.isInteger(n))return NaN;
  return dec?Math.round(n*1000)/1000:n;
 }
-function nudge(input,dir,dec){
+function nudge(input,dir,dec,step){
  const cur=readCount(input.value,true);
  let n=Number.isNaN(cur)?null:cur;
  if(n===null){if(dir<0){input.value='';return}n=0}
- n+=dir;if(n<0)n=0;
+ n+=dir*(step||1);if(n<0)n=0;
  if(!dec)n=Math.round(n);else n=Math.round(n*1000)/1000;
  input.value=String(n);
 }
@@ -132,17 +166,119 @@ function openCountSheet(id){
  const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id];
  const c2ui=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+(loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:''):'';
  const placeUi=place?`<div class="sheetLoc">Location: ${esc(place)}</div>`:'';
- const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">PAR ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${c2ui}${placeUi}</div><div class="sheetFoot"><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
+ // The fraction bar is only for decimal items. A whole count leaves it dimmed, showing 0.5, until a tap adds a half.
+ const fracUi=dec?`<div class="fracBar" id="shFrac" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="Fractional part of the count" aria-valuemin="0" aria-valuemax="1" aria-valuestep="0.1" aria-valuenow="0.5"><div class="fracFill" id="shFracFill"></div><div class="fracMid" aria-hidden="true"></div><div class="fracRead" id="shFracRead">0.5</div></div>`:'';
+ const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">Par ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${fracUi}${c2ui}${placeUi}</div><div class="sheetFoot"><div class="sheetStrip" aria-live="polite"><span id="shOnHand">On hand: —</span><span id="shOrder">Order —</span></div><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
+ const countEl=form.querySelector('#shCount');
+ const bar=form.querySelector('#shFrac');
+ let shown=null,drag=null; // shown = fraction the finger is on; null means read it back from the count
+ const fracPart=n=>{if(n==null||Number.isNaN(n))return 0;const whole=Math.floor(n+1e-9);let f=Math.round((n-whole)*10)/10;return f>0&&f<1?f:0};
+ const paintFrac=()=>{
+  if(!bar)return;
+  const raw=readCount(countEl.value,true);
+  const blank=raw==null||Number.isNaN(raw);
+  const actual=blank?0:fracPart(raw);
+  const parked=shown==null&&(blank||actual===0); // whole counts rest dimmed, drawn at 0.5
+  const display=shown==null?(parked?0.5:actual):shown;
+  const clamped=Math.min(1,Math.max(0,Math.round(display*10)/10));
+  form.querySelector('#shFracFill').style.width=(clamped*100)+'%';
+  form.querySelector('#shFracRead').textContent=clamped.toFixed(1);
+  bar.setAttribute('aria-valuenow',clamped.toFixed(1));
+  bar.classList.toggle('parked',parked);
+  if(parked)bar.setAttribute('aria-valuetext','Inactive. Tap to add one half.');
+  else bar.removeAttribute('aria-valuetext');
+ };
+ const paintStrip=()=>{
+  const skipOn=form.querySelector('#shSkip').getAttribute('aria-pressed')==='true';
+  const raw=readCount(countEl.value,dec);
+  const c2el=form.querySelector('#shCount2');
+  const raw2=c2el?readCount(c2el.value,dec):null;
+  const hand=form.querySelector('#shOnHand'),ord=form.querySelector('#shOrder');
+  if(skipOn||Number.isNaN(raw)||Number.isNaN(raw2)){hand.textContent='On hand: —';ord.textContent='Order —';return}
+  const have=onHandOf({count:raw,count2:raw2,count2Label:lab});
+  if(have==null){hand.textContent='On hand: —';ord.textContent='Order —';return}
+  const need=have<i.par?orderNeed(i.par,have):0;
+  hand.textContent='On hand: '+String(have);
+  ord.textContent='Order '+need;
+ };
  const applySkip=on=>{
   const b=form.querySelector('#shSkip');
   b.classList.toggle('skipOn',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Unskip':'Skip';
   form.querySelectorAll('.stepRow').forEach(r=>r.classList.toggle('off',on));
   form.querySelectorAll('.stepBtn,.stepVal').forEach(el=>{el.disabled=on});
+  if(bar){bar.classList.toggle('off',on);if(on)bar.setAttribute('aria-disabled','true');else bar.removeAttribute('aria-disabled')}
+  if(on){drag=null;shown=null;document.body.classList.remove('fracDrag')}
+  paintStrip();
  };
  applySkip(sk);
- form.querySelector('#shSkip').onclick=()=>applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');
- form.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>nudge(form.querySelector('#'+b.dataset.for),+b.dataset.dir,dec));
+ form.querySelector('#shSkip').onclick=()=>{applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');paintFrac()};
+ form.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>{
+  nudge(form.querySelector('#'+b.dataset.for),+b.dataset.dir,dec,1); // always one whole unit; a leftover halfStep is ignored
+  if(b.dataset.for==='shCount'){shown=null;paintFrac()}
+  paintStrip();
+ });
+ countEl.addEventListener('input',()=>{shown=null;paintFrac();paintStrip()});
+ const c2el=form.querySelector('#shCount2');
+ if(c2el)c2el.addEventListener('input',paintStrip);
+ if(bar){
+  const fromX=x=>{const r=bar.getBoundingClientRect();const w=r.width||1;let t=(x-r.left)/w;if(t<0)t=0;if(t>1)t=1;return Math.round(t*10)/10};
+  const applyFrac=(base,frac)=>{
+   const whole=frac===0||frac===1; // either end lands on a whole count and parks the bar
+   shown=whole?null:frac;
+   let n=Math.round((base+frac)*10)/10;if(n<0)n=0;
+   countEl.value=String(n);
+   if(whole&&drag){drag.parked=true;drag.moved=true}
+   paintFrac();paintStrip();
+  };
+  const baseOf=()=>{const raw=readCount(countEl.value,true);return (raw==null||Number.isNaN(raw))?0:Math.floor(raw+1e-9)};
+  const resting=()=>{const raw=readCount(countEl.value,true);return raw==null||Number.isNaN(raw)||fracPart(raw)===0};
+  bar.addEventListener('pointerdown',e=>{
+   if(bar.classList.contains('off'))return;
+   if(e.pointerType==='mouse'&&e.button!==0)return;
+   e.preventDefault();e.stopPropagation();
+   drag={id:e.pointerId,base:baseOf(),x:e.clientX,y:e.clientY,parked:resting(),moved:false};
+   document.body.classList.add('fracDrag');
+   try{bar.setPointerCapture(e.pointerId)}catch{}
+   if(!drag.parked)applyFrac(drag.base,fromX(e.clientX));
+  });
+  bar.addEventListener('pointermove',e=>{
+   if(!drag||e.pointerId!==drag.id)return;
+   e.preventDefault();
+   if(drag.parked){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>12)drag.moved=true;return}
+   applyFrac(drag.base,fromX(e.clientX));
+  });
+  const up=e=>{
+   if(!drag||e.pointerId!==drag.id)return;
+   const tap=drag.parked&&!drag.moved;
+   drag=null;shown=null;document.body.classList.remove('fracDrag');
+   if(tap){const raw=readCount(countEl.value,true);const base=(raw==null||Number.isNaN(raw))?0:raw;let n=Math.round((base+0.5)*10)/10;if(n<0)n=0;countEl.value=String(n)}
+   paintFrac();paintStrip();
+  };
+  bar.addEventListener('pointerup',up);
+  bar.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.id)return;drag=null;shown=null;document.body.classList.remove('fracDrag');paintFrac()});
+  bar.addEventListener('touchmove',e=>{if(drag)e.preventDefault()},{passive:false});
+  bar.addEventListener('keydown',e=>{
+   if(bar.classList.contains('off'))return;
+   const raw=readCount(countEl.value,true);
+   const blank=raw==null||Number.isNaN(raw);
+   const n=blank?0:raw;
+   if(blank||fracPart(n)===0){
+    if(e.key==='ArrowRight'||e.key==='ArrowUp'||e.key==='End'){e.preventDefault();countEl.value=String(Math.round((n+0.5)*10)/10);shown=null;paintFrac();paintStrip()}
+    else if(e.key==='ArrowLeft'||e.key==='ArrowDown'||e.key==='Home')e.preventDefault();
+    return;
+   }
+   const base=Math.floor(n+1e-9);
+   let f=fracPart(n);
+   if(e.key==='ArrowRight'||e.key==='ArrowUp')f=Math.min(1,Math.round((f+0.1)*10)/10);
+   else if(e.key==='ArrowLeft'||e.key==='ArrowDown')f=Math.max(0,Math.round((f-0.1)*10)/10);
+   else if(e.key==='Home')f=0;
+   else if(e.key==='End')f=1;
+   else return;
+   e.preventDefault();
+   shown=null;applyFrac(base,f);shown=null;paintFrac();
+  });
+ }
  form.querySelector('#shCancel').onclick=()=>closeSheet();
  form.onsubmit=e=>{
   e.preventDefault();
@@ -156,7 +292,8 @@ function openCountSheet(id){
   if(lab){if(n2===null)delete d.counts2[id];else d.counts2[id]=n2}else delete d.counts2[id];
   save();render();
  };
- const first=form.querySelector('#shCount');
+ paintFrac();
+ const first=countEl;
  setTimeout(()=>{if(first&&!first.disabled)first.focus();else form.querySelector('#shSkip').focus()},0);
 }
 function openItemSheet(o){
@@ -165,11 +302,12 @@ function openItemSheet(o){
  if(isEdit&&!cur)return;
  const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'',loc2=lab?itemCount2Loc(cur):'';
  const place=isEdit?itemLoc(cur):''; // older items have no location; the box stays blank
+ const vend=isEdit?itemVendor(cur):''; // older items have no vendor; the box stays blank
  const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
- const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><label class="afield">Name<input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="afield">Category<select id="shCat">${opts}</select></label><label class="afield">PAR<input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label><label class="afield">Cost $<input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label><label class="acheck"><input type="checkbox" id="shDec"${decOn?' checked':''}> Allow decimals</label><p class="muted">Off counts whole units. On allows numbers like 0.5.</p><label class="afield"><span>Location <span class="muted opt">optional</span></span><input id="shLoc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, bar fridge" value="${esc(place)}"></label><label class="acheck"><input type="checkbox" id="shC2"${lab?' checked':''}> Add a second count</label><div id="shC2wrap"${lab?'':' hidden'}><label class="afield">Second count label<input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="afield"><span>Second count location <span class="muted opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div><p class="muted" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><section class="fieldGroup" aria-label="Basics"><h3 class="fieldHead">Basics</h3><label class="fieldRow z0"><span class="fieldLbl">Name</span><input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="fieldRow z1"><span class="fieldLbl">Category</span><span class="fieldHelp">The section this item is listed under.</span><select id="shCat">${opts}</select></label><label class="fieldRow z0"><span class="fieldLbl">PAR</span><span class="fieldHelp">How many to keep on hand.</span><input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label></section><section class="fieldGroup" aria-label="Ordering"><h3 class="fieldHead">Ordering</h3><label class="fieldRow z1"><span class="fieldLbl">Vendor <span class="opt">optional</span></span><span class="fieldHelp">Groups the order list.</span><input id="shVendor" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Cafe Imports, Sysco" value="${esc(vend)}"></label><label class="fieldRow z0"><span class="fieldLbl">Cost $ <span class="opt">optional</span></span><span class="fieldHelp">Per unit. Overhead only, not the order list.</span><input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label></section><section class="fieldGroup" aria-label="Where it lives"><h3 class="fieldHead">Where it lives</h3><label class="fieldRow z1"><span class="fieldLbl">Location <span class="opt">optional</span></span><span class="fieldHelp">Where it sits in the shop.</span><input id="shLoc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, bar fridge" value="${esc(place)}"></label></section><section class="fieldGroup" aria-label="Counting"><h3 class="fieldHead">Counting</h3><label class="fieldRow z0 isCheck"><input type="checkbox" id="shDec"${decOn?' checked':''}><span class="checkCopy"><span class="fieldLbl">Allow decimals</span><span class="fieldHelp">Off counts whole units. On allows numbers like 0.5.</span></span></label><div class="fieldRow z1"><label class="isCheck"><input type="checkbox" id="shC2"${lab?' checked':''}><span class="fieldLbl">Add a second count</span></label><p class="fieldHelp" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div id="shC2wrap"${lab?'':' hidden'}><label class="fieldRow z0"><span class="fieldLbl">Second count label</span><input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="fieldRow z1"><span class="fieldLbl">Second count location <span class="opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div></section></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),locI=form.querySelector('#shC2loc'),err=form.querySelector('#shErr');
- bindLocSuggest(form.querySelector('#shLoc'));bindLocSuggest(locI);
+ bindLocSuggest(form.querySelector('#shLoc'));bindVendorSuggest(form.querySelector('#shVendor'));bindLocSuggest(locI);
  form.addEventListener('input',()=>{err.textContent=''});
  const revealC2=()=>requestAnimationFrame(()=>{if(!c2.checked)return;const over=locI.getBoundingClientRect().bottom-form.querySelector('.sheetFoot').getBoundingClientRect().top+8;if(over>0)form.querySelector('.sheetBody').scrollTop+=over});
  c2.onchange=()=>{const on=c2.checked;wrap.hidden=!on;note.hidden=!on;err.textContent='';if(!on){labI.value='';locI.value=''}else{labI.focus();revealC2()}};
@@ -184,13 +322,13 @@ function openItemSheet(o){
   if(!isFinite(par)||par<0){err.textContent='PAR must be a number that is 0 or more.';return}
   const cost=parseCost(form.querySelector('#shCost').value);
   if(Number.isNaN(cost)){err.textContent='Cost must be a dollar amount, like 4.50.';return}
-  const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim(),placeV=form.querySelector('#shLoc').value.trim();
+  const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim(),placeV=form.querySelector('#shLoc').value.trim(),vendorV=form.querySelector('#shVendor').value.trim();
   if(want2&&!label){err.textContent='Name the second count, like bags or cases, or turn it off.';return}
   const now=isEdit?locateItem(cur.id):null;
   if(isEdit&&!now){err.textContent='That item is no longer in the database.';return}
   const toGi=+form.querySelector('#shCat').value; // catalog section only; location text never creates or moves a header
   if(!S.headers[toGi]){err.textContent='Choose a category.';return}
-  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(placeV)it.location=placeV;else delete it.location;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
+  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(placeV)it.location=placeV;else delete it.location;if(vendorV)it.vendor=vendorV;else delete it.vendor;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
   if(isEdit){
    write(now.item);
    if(toGi!==now.gi){S.headers[now.gi].items.splice(now.ii,1);S.headers[toGi].items.push(now.item)}
@@ -237,9 +375,30 @@ function lastSavedText(){const t=S.snapshots.map(x=>x.savedAt).filter(Boolean).s
 function toast(m){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.classList.add('show');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('show'),2600)}
 // ORDERS
 function orders(){const s=latest();if(s&&S.ordersClearedAt&&S.ordersClearedAt>=s.savedAt){V.innerHTML=`<div class="card empty">New count started. The Order List will fill in when you tap <b>Save count</b>. Earlier order lists are in <b>History</b>.</div>`;return}if(!s){V.innerHTML=`<div class="card empty">No saved counts yet. Do a count in the <b>Inventory</b> tab.</div>`;return}
- V.innerHTML=`<p class="muted">From count on <b>${s.date}</b> (saved ${fmt(s.savedAt)})</p>`+orderHtml(s)}
+ V.innerHTML=`<p class="muted">From count on <b>${s.date}</b> (saved ${fmt(s.savedAt)})</p>`+orderVendorHtml(s)}
+// Order List groups by vendor. No prices on this screen. A saved week's order list stays in orderHtml (category, still no cost).
+function orderVendorHtml(s){
+ const L=shortList(s.groups);
+ if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
+ const map=new Map();
+ for(const g of L)for(const i of g.items){
+  const raw=vendorForLine(g.name,i);
+  const key=raw.toLowerCase();
+  let bucket=map.get(key);
+  if(!bucket){bucket={label:raw||'No vendor',items:[]};map.set(key,bucket)}
+  bucket.items.push(i);
+ }
+ const keys=[...map.keys()].filter(Boolean).sort((a,b)=>map.get(a).label.localeCompare(map.get(b).label,undefined,{sensitivity:'base'}));
+ if(map.has(''))keys.push('');
+ return keys.map(k=>{
+  const b=map.get(k),n=b.items.length;
+  return `<section class="vGroup"><div class="vHead"><h3>${esc(b.label)}</h3><span class="vCount">${n} ${n===1?'item':'items'}</span></div><div class="card vCard">`+
+   b.items.map(i=>`<div class="item vItem"><div class="name">${esc(i.name)}<div class="muted vHave">Have ${esc(i.have)}, par ${esc(i.par)}</div></div><span class="vNeed"><span class="vNeedLbl">Order</span>${esc(i.need)}</span></div>`).join('')+
+   `</div></section>`;
+ }).join('');
+}
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
- return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
+ return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.have} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
 function count2Note(i){const label=String(i&&i.count2Label||'').trim();if(!label||i.count2==null)return '';const loc=itemCount2Loc(i);return ` <span class="muted c2note">· ${esc(i.count2)} ${esc(label)}${loc?` · ${esc(loc)}`:''}</span>`}
 function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);const place=itemLoc(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${place?`<div class="muted locNote">${esc(place)}</div>`:''}${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
@@ -281,15 +440,60 @@ function bindOh(root,canOff){ // canOff: tapping the selected window hides the r
  root.querySelectorAll('.ohWin button').forEach(b=>b.onclick=()=>{localStorage.setItem(OH_KEY,canOff&&b.dataset.ow===ohKind()?'off':b.dataset.ow);render()});
  root.querySelectorAll('input.ohEnd').forEach(i=>i.onchange=()=>{setOhEnd(i.value);render()});
  root.querySelectorAll('[data-oe]').forEach(b=>b.onclick=()=>{setOhEnd(b.dataset.oe==='sun'?lastSunday():today());render()})}
+function snapOrderCost(s){ // one saved count's order total, same math as Overhead: need × current cost, primary count only
+ const L=shortList(s&&s.groups).map(g=>({name:g.name,items:g.items.map(i=>({...i,qty:i.need}))}));
+ return costGroups(L);
+}
+function vendorSpend(s){
+ const map=new Map();
+ for(const g of shortList(s&&s.groups))for(const i of g.items){
+  const raw=vendorForLine(g.name,i);
+  const key=raw.toLowerCase();
+  let b=map.get(key);
+  if(!b){b={label:raw||'No vendor',total:0,missing:0};map.set(key,b)}
+  const c=costOf(g.name,i.name);
+  if(c==null)b.missing++;
+  else b.total=Math.round((b.total+i.need*c)*100)/100;
+ }
+ const rows=[...map.values()].sort((a,b)=>b.total-a.total||a.label.localeCompare(b.label,undefined,{sensitivity:'base'}));
+ return rows;
+}
+function fyDayParts(iso){const d=dayOf(iso);return{m:d.toLocaleDateString(undefined,{month:'short'}),d:String(d.getDate())}}
+function forYouHtml(){
+ const snaps=S.snapshots.filter(s=>s&&Array.isArray(s.groups));
+ if(!snaps.length)return'';
+ const cur=snaps[snaps.length-1],prev=snaps.length>1?snaps[snaps.length-2]:null;
+ const curCost=snapOrderCost(cur),prevCost=prev?snapOrderCost(prev):null;
+ const diff=prevCost?Math.round((curCost.total-prevCost.total)*100)/100:null;
+ const delta=diff==null?'':`<p class="fyDelta">${diff===0?'Same as the previous period':(diff>0?'Up ':'Down ')+money(Math.abs(diff))+' from the previous period'}</p>`;
+ const rows=vendorSpend(cur);
+ const maxV=rows.reduce((m,r)=>Math.max(m,r.total),0);
+ const vend=rows.length?rows.map(r=>{
+  const pct=maxV?Math.round(r.total/maxV*1000)/10:0;
+  const amt=r.total>0?money(r.total):(r.missing?'—':money(0));
+  return `<div class="fyVendRow"><div class="fyVendTop"><span>${esc(r.label)}</span><span>${amt}</span></div><div class="fyTrack" role="img" aria-label="${esc(r.label)} ${esc(amt)}"><div class="fyFill" style="width:${pct}%"></div></div></div>`;
+ }).join(''):`<p class="fyEmpty">Nothing to order on this count.</p>`;
+ const series=snaps.slice(-8);
+ const costs=series.map(s=>snapOrderCost(s).total);
+ const maxC=costs.reduce((m,n)=>Math.max(m,n),0);
+ const chart=series.map((s,n)=>{
+  const total=costs[n],now=s===cur,pct=maxC?Math.round(total/maxC*100):0,parts=fyDayParts(s.date);
+  return `<div class="fyCol${now?' now':''}" role="img" aria-label="${esc(fmtDay(s.date,true))}, ${money(total)}${now?', current period':''}"><div class="fyBarWrap"><div class="fyBar${now?' now':''}" style="height:${pct}%"></div></div><span class="fyLab">${esc(parts.m)}<b>${esc(parts.d)}</b>${now?'<b class="fyNowLab">Now</b>':''}</span></div>`;
+ }).join('');
+ const miss=curCost.missing?`<p class="fyNote">${curCost.missing} item${curCost.missing===1?'':'s'} without a cost ${curCost.missing===1?"isn't":"aren't"} in these totals.</p>`:'';
+ const more=snaps.length>8?`<p class="fyNote">Last 8 counts.</p>`:'';
+ return `<section class="forYou" aria-label="For you only"><div class="forYouCard"><h2>For you only</h2><p class="fyNote">Order cost from the primary count. Quantity to reach par × the cost in Database.</p><div class="fyCompare"><div class="fyStat fyNow"><div class="fyK">Latest count</div><div class="fyD">${esc(fmtDay(cur.date,true))}</div><div class="fyN">${money(curCost.total)}</div></div><div class="fyStat"><div class="fyK">Previous period</div><div class="fyD">${prev?esc(fmtDay(prev.date,true)):'No earlier count'}</div><div class="fyN">${prevCost?money(prevCost.total):'—'}</div></div></div>${delta}<h3>By vendor</h3>${vend}${miss}<h3>Past periods</h3><div class="fyChart" role="img" aria-label="Order totals by saved count. The latest is highlighted.">${chart}</div>${more}</div></section>`;
+}
 function overheadHtml(){
  if(!S.snapshots.length)return'';
  const kind=ohKind();
- if(kind==='off')return`<section class="overhead ohOff" aria-label="Overhead (off)"><div class="bar ohBar"><b>Overhead</b><span class="hsw ohWin">${ohWinBtns(kind)}</span></div></section><h2 class="histHead">Saved counts</h2>`;
+ const you=forYouHtml();
+ if(kind==='off')return`<section class="overhead ohOff" aria-label="Overhead (off)"><div class="bar ohBar"><b>Overhead</b><span class="hsw ohWin">${ohWinBtns(kind)}</span></div></section>${you}<h2 class="histHead">Saved counts</h2>`;
  const o=computeOverhead(kind);const msg=ohEmpty(o);
  const body=msg?`<div class="card empty">${esc(msg)}</div>`:o.groups.map(g=>`<div class="card"><h3 class="ghead">${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}</div><span class="ohQty">${i.qty} @ ${i.c===null?'—':money(i.c)}</span><b class="ohLine">${i.line===null?'—':money(i.line)}</b></div>`).join('')
   +(g.subN?`<div class="item ohSubRow"><div class="name muted">Subtotal</div><b class="ohSub">${money(g.sub)}</b></div>`:'')+`</div>`).join('')
   +`<div class="card ohTotalCard"><div class="item"><div class="name"><b>Overhead total</b></div><b class="ohTotal">${money(o.total)}</b></div>${o.missing?`<p class="muted ohNote">${o.missing} item${o.missing===1?'':'s'} without a cost ${o.missing===1?"isn't":"aren't"} in the total. Add costs in the <b>Database</b> tab.</p>`:''}<p class="muted ohHow">Order cost of the ${o.counts} saved count${o.counts===1?'':'s'} in this window.</p></div>`;
- return`<section class="overhead" aria-label="Overhead"><div class="bar ohBar"><b>Overhead</b>${ohControlsHtml(kind)}<button type="button" class="light sm ohPrint" id="ohPrint" aria-label="Print overhead">Print overhead</button></div><p class="muted ohRange">${esc(windowText(kind,o)+' · '+rangeText(o))}</p>${body}</section><h2 class="histHead">Saved counts</h2>`}
+ return`<section class="overhead" aria-label="Overhead"><div class="bar ohBar"><b>Overhead</b>${ohControlsHtml(kind)}<button type="button" class="light sm ohPrint" id="ohPrint" aria-label="Print overhead">Print overhead</button></div><p class="muted ohRange">${esc(windowText(kind,o)+' · '+rangeText(o))}</p>${body}</section>${you}<h2 class="histHead">Saved counts</h2>`}
 // PRINT VIEW (typewriter / receipt; @media print prints only .receipt). Two independent prints: To order | Overhead (timeframe).
 let pvOpts=false,pvSnap=null; // Options panel collapsed on every open; pvSnap = saved count to print (null = latest)
 function printKind(){return localStorage.getItem(PRINT_KIND_KEY)==='overhead'?'overhead':'order'} // remembered; default To order
@@ -305,7 +509,7 @@ function orderReceiptHtml(){ // To order print: one saved count's order list (de
   body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`;
   if(!L.length)body+=`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
   else{const M=costGroups(L);
-   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.count} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
+   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.have} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
     +`<div class="rRule"></div><div class="rOLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
  return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rHeading">To order</h2>${body}</section>`}
 function overheadReceiptHtml(){ // Overhead print: the History Overhead report for the chosen window + end date
@@ -353,7 +557,7 @@ function database(){
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;
-  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'',place=itemLoc(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${place?`<div class="muted dbC2">${esc(place)}</div>`:''}${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
+  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'',place=itemLoc(i),vend=itemVendor(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${vend?`<div class="muted dbC2">Vendor: ${esc(vend)}</div>`:''}${place?`<div class="muted dbC2">${esc(place)}</div>`:''}${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
  q('.hsw button').forEach(b=>b.onclick=()=>{const k=b.dataset.hs;const set=HS.split(' ').filter(x=>x&&x!==k);if(!hsOn(k))set.push(k);HS=set.sort().join(' ');localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});

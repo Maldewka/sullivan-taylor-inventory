@@ -327,10 +327,12 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 
 /* New item / Edit item. Each field is a full-width band. Shades alternate down the
    whole sheet, like a spreadsheet, and do not restart at each group. */
-#shItemForm .sheetBody{padding:4px 0 0}
+#shItemForm{background:#f3ebe3}
+#shItemForm .sheetBody{padding:4px 0 0;background:#f3ebe3}
 #shItemForm h2{padding:0 16px 2px}
 #shItemForm .fieldGroup{margin:0;padding:0}
-#shItemForm .fieldHead{margin:0;padding:8px 16px 3px;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:#5b3a29;line-height:1.2}
+#shItemForm .fieldHead{margin:0;padding:8px 16px 4px;background:#3b2418;border:0;outline:none;box-shadow:none;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;text-align:center;color:#f6efe6;line-height:1.2}
+#shItemForm .sheetFoot{background:#f3ebe3;border-top-color:#e4cdb8}
 #shItemForm .fieldRow{display:flex;flex-direction:column;gap:2px;margin:0;padding:7px 16px 8px;border-radius:0}
 #shItemForm .fieldRow.z0{background:#f3ebe3}
 #shItemForm .fieldRow.z1{background:#e4cdb8}

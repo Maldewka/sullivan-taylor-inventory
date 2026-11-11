@@ -160,39 +160,104 @@ function stepHtml(label,id,val,dec){
  const shown=val==null?'':String(val);
  return `<div class="stepRow"><span class="stepLbl">${esc(label)}</span><button type="button" class="stepBtn" data-for="${id}" data-dir="-1" aria-label="Decrease ${esc(label)}">−</button><input id="${id}" class="stepVal" inputmode="${dec?'decimal':'numeric'}" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" value="${esc(shown)}" aria-label="${esc(label)}"><button type="button" class="stepBtn" data-for="${id}" data-dir="1" aria-label="Increase ${esc(label)}">+</button></div>`;
 }
-function openCountSheet(id){
- const loc=locateItem(id);if(!loc||!S.draft)return;
- const d=S.draft;d.counts=d.counts||{};d.counts2=d.counts2||{};d.skipped=d.skipped||{};
- const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id];
- const c2ui=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+(loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:''):'';
- const placeUi=place?`<div class="sheetLoc">Location: ${esc(place)}</div>`:'';
- // The fraction bar is only for decimal items. A whole count leaves it dimmed, showing 0.5, until a tap adds a half.
- const fracUi=dec?`<div class="fracBar" id="shFrac" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="Fractional part of the count" aria-valuemin="0" aria-valuemax="1" aria-valuestep="0.1" aria-valuenow="0.5"><div class="fracFill" id="shFracFill"></div><div class="fracMid" aria-hidden="true"></div><div class="fracRead" id="shFracRead">0.5</div></div>`:'';
- const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">Par ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${fracUi}${c2ui}${placeUi}</div><div class="sheetFoot"><div class="sheetStrip" aria-live="polite"><span id="shOnHand">On hand: —</span><span id="shOrder">Order —</span></div><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
- const form=back.querySelector('form');
- const countEl=form.querySelector('#shCount');
- const bar=form.querySelector('#shFrac');
- let shown=null,drag=null; // shown = fraction the finger is on; null means read it back from the count
+function fracHtml(id,label){
+ return `<div class="fracBar" id="${id}" role="slider" tabindex="0" aria-orientation="horizontal" aria-label="${esc(label)}" aria-valuemin="0" aria-valuemax="1" aria-valuestep="0.1" aria-valuenow="0.5"><div class="fracFill"></div><div class="fracMid" aria-hidden="true"></div><div class="fracRead">0.5</div></div>`;
+}
+function bindFrac(bar,input,onChange){ // one fraction slider for one count field; parked at 0.5 when that count is whole
+ const noop={paint(){},reset(){},abort(){}};
+ if(!bar||!input)return noop;
+ let shown=null,drag=null;
+ const fill=bar.querySelector('.fracFill'),read=bar.querySelector('.fracRead');
  const fracPart=n=>{if(n==null||Number.isNaN(n))return 0;const whole=Math.floor(n+1e-9);let f=Math.round((n-whole)*10)/10;return f>0&&f<1?f:0};
- const paintFrac=()=>{
-  if(!bar)return;
-  const raw=readCount(countEl.value,true);
+ const paint=()=>{
+  const raw=readCount(input.value,true);
   const blank=raw==null||Number.isNaN(raw);
   const actual=blank?0:fracPart(raw);
-  const parked=shown==null&&(blank||actual===0); // whole counts rest dimmed, drawn at 0.5
+  const parked=shown==null&&(blank||actual===0);
   const display=shown==null?(parked?0.5:actual):shown;
   const clamped=Math.min(1,Math.max(0,Math.round(display*10)/10));
-  form.querySelector('#shFracFill').style.width=(clamped*100)+'%';
-  form.querySelector('#shFracRead').textContent=clamped.toFixed(1);
+  fill.style.width=(clamped*100)+'%';
+  read.textContent=clamped.toFixed(1);
   bar.setAttribute('aria-valuenow',clamped.toFixed(1));
   bar.classList.toggle('parked',parked);
   if(parked)bar.setAttribute('aria-valuetext','Inactive. Tap to add one half.');
   else bar.removeAttribute('aria-valuetext');
  };
+ const changed=()=>{paint();if(onChange)onChange()};
+ const applyFrac=(base,frac)=>{
+  const whole=frac===0||frac===1;
+  shown=whole?null:frac;
+  let n=Math.round((base+frac)*10)/10;if(n<0)n=0;
+  input.value=String(n);
+  if(whole&&drag){drag.parked=true;drag.moved=true}
+  changed();
+ };
+ const fromX=x=>{const r=bar.getBoundingClientRect();const w=r.width||1;let t=(x-r.left)/w;if(t<0)t=0;if(t>1)t=1;return Math.round(t*10)/10};
+ const baseOf=()=>{const raw=readCount(input.value,true);return (raw==null||Number.isNaN(raw))?0:Math.floor(raw+1e-9)};
+ const resting=()=>{const raw=readCount(input.value,true);return raw==null||Number.isNaN(raw)||fracPart(raw)===0};
+ bar.addEventListener('pointerdown',e=>{
+  if(bar.classList.contains('off'))return;
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  e.preventDefault();e.stopPropagation();
+  drag={id:e.pointerId,base:baseOf(),x:e.clientX,y:e.clientY,parked:resting(),moved:false};
+  document.body.classList.add('fracDrag');
+  try{bar.setPointerCapture(e.pointerId)}catch{}
+  if(!drag.parked)applyFrac(drag.base,fromX(e.clientX));
+ });
+ bar.addEventListener('pointermove',e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  e.preventDefault();
+  if(drag.parked){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>12)drag.moved=true;return}
+  applyFrac(drag.base,fromX(e.clientX));
+ });
+ const up=e=>{
+  if(!drag||e.pointerId!==drag.id)return;
+  const tap=drag.parked&&!drag.moved;
+  drag=null;shown=null;document.body.classList.remove('fracDrag');
+  if(tap){const raw=readCount(input.value,true);const base=(raw==null||Number.isNaN(raw))?0:raw;let n=Math.round((base+0.5)*10)/10;if(n<0)n=0;input.value=String(n)}
+  changed();
+ };
+ bar.addEventListener('pointerup',up);
+ bar.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.id)return;drag=null;shown=null;document.body.classList.remove('fracDrag');paint()});
+ bar.addEventListener('touchmove',e=>{if(drag)e.preventDefault()},{passive:false});
+ bar.addEventListener('keydown',e=>{
+  if(bar.classList.contains('off'))return;
+  const raw=readCount(input.value,true);
+  const blank=raw==null||Number.isNaN(raw);
+  const n=blank?0:raw;
+  if(blank||fracPart(n)===0){
+   if(e.key==='ArrowRight'||e.key==='ArrowUp'||e.key==='End'){e.preventDefault();input.value=String(Math.round((n+0.5)*10)/10);shown=null;changed()}
+   else if(e.key==='ArrowLeft'||e.key==='ArrowDown'||e.key==='Home')e.preventDefault();
+   return;
+  }
+  const base=Math.floor(n+1e-9);
+  let f=fracPart(n);
+  if(e.key==='ArrowRight'||e.key==='ArrowUp')f=Math.min(1,Math.round((f+0.1)*10)/10);
+  else if(e.key==='ArrowLeft'||e.key==='ArrowDown')f=Math.max(0,Math.round((f-0.1)*10)/10);
+  else if(e.key==='Home')f=0;
+  else if(e.key==='End')f=1;
+  else return;
+  e.preventDefault();
+  shown=null;applyFrac(base,f);shown=null;changed();
+ });
+ return {paint,reset(){shown=null},abort(){drag=null;shown=null;document.body.classList.remove('fracDrag')}};
+}
+function openCountSheet(id){
+ const loc=locateItem(id);if(!loc||!S.draft)return;
+ const d=S.draft;d.counts=d.counts||{};d.counts2=d.counts2||{};d.skipped=d.skipped||{};
+ const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id];
+ const c2frac=dec&&lab?fracHtml('shFrac2','Fractional part of the second count'):'';
+ const c2ui=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+c2frac+(loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:''):'';
+ const placeUi=place?`<div class="sheetLoc">Location: ${esc(place)}</div>`:'';
+ // Fraction bars are only for decimal items. A whole count leaves its own bar dimmed at 0.5 until a tap adds a half.
+ const fracUi=dec?fracHtml('shFrac','Fractional part of the count'):'';
+ const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">Par ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${fracUi}${c2ui}${placeUi}</div><div class="sheetFoot"><div class="sheetStrip" aria-live="polite"><span id="shOnHand">On hand: —</span><span id="shOrder">Order —</span></div><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
+ const form=back.querySelector('form');
+ const countEl=form.querySelector('#shCount');
+ const c2el=form.querySelector('#shCount2');
  const paintStrip=()=>{
   const skipOn=form.querySelector('#shSkip').getAttribute('aria-pressed')==='true';
   const raw=readCount(countEl.value,dec);
-  const c2el=form.querySelector('#shCount2');
   const raw2=c2el?readCount(c2el.value,dec):null;
   const hand=form.querySelector('#shOnHand'),ord=form.querySelector('#shOrder');
   if(skipOn||Number.isNaN(raw)||Number.isNaN(raw2)){hand.textContent='On hand: —';ord.textContent='Order —';return}
@@ -207,78 +272,22 @@ function openCountSheet(id){
   b.classList.toggle('skipOn',on);b.setAttribute('aria-pressed',on?'true':'false');b.textContent=on?'Unskip':'Skip';
   form.querySelectorAll('.stepRow').forEach(r=>r.classList.toggle('off',on));
   form.querySelectorAll('.stepBtn,.stepVal').forEach(el=>{el.disabled=on});
-  if(bar){bar.classList.toggle('off',on);if(on)bar.setAttribute('aria-disabled','true');else bar.removeAttribute('aria-disabled')}
-  if(on){drag=null;shown=null;document.body.classList.remove('fracDrag')}
+  form.querySelectorAll('.fracBar').forEach(el=>{el.classList.toggle('off',on);if(on)el.setAttribute('aria-disabled','true');else el.removeAttribute('aria-disabled')});
+  if(on){fracs.forEach(f=>f.abort());document.body.classList.remove('fracDrag')}
   paintStrip();
  };
+ const frac1=bindFrac(form.querySelector('#shFrac'),countEl,paintStrip);
+ const frac2=bindFrac(form.querySelector('#shFrac2'),c2el,paintStrip);
+ const fracs=[frac1,frac2];
  applySkip(sk);
- form.querySelector('#shSkip').onclick=()=>{applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');paintFrac()};
+ form.querySelector('#shSkip').onclick=()=>{applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');fracs.forEach(f=>f.paint())};
  form.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>{
   nudge(form.querySelector('#'+b.dataset.for),+b.dataset.dir,dec,1); // always one whole unit; a leftover halfStep is ignored
-  if(b.dataset.for==='shCount'){shown=null;paintFrac()}
-  paintStrip();
+  const frac=b.dataset.for==='shCount2'?frac2:frac1;
+  frac.reset();frac.paint();paintStrip();
  });
- countEl.addEventListener('input',()=>{shown=null;paintFrac();paintStrip()});
- const c2el=form.querySelector('#shCount2');
- if(c2el)c2el.addEventListener('input',paintStrip);
- if(bar){
-  const fromX=x=>{const r=bar.getBoundingClientRect();const w=r.width||1;let t=(x-r.left)/w;if(t<0)t=0;if(t>1)t=1;return Math.round(t*10)/10};
-  const applyFrac=(base,frac)=>{
-   const whole=frac===0||frac===1; // either end lands on a whole count and parks the bar
-   shown=whole?null:frac;
-   let n=Math.round((base+frac)*10)/10;if(n<0)n=0;
-   countEl.value=String(n);
-   if(whole&&drag){drag.parked=true;drag.moved=true}
-   paintFrac();paintStrip();
-  };
-  const baseOf=()=>{const raw=readCount(countEl.value,true);return (raw==null||Number.isNaN(raw))?0:Math.floor(raw+1e-9)};
-  const resting=()=>{const raw=readCount(countEl.value,true);return raw==null||Number.isNaN(raw)||fracPart(raw)===0};
-  bar.addEventListener('pointerdown',e=>{
-   if(bar.classList.contains('off'))return;
-   if(e.pointerType==='mouse'&&e.button!==0)return;
-   e.preventDefault();e.stopPropagation();
-   drag={id:e.pointerId,base:baseOf(),x:e.clientX,y:e.clientY,parked:resting(),moved:false};
-   document.body.classList.add('fracDrag');
-   try{bar.setPointerCapture(e.pointerId)}catch{}
-   if(!drag.parked)applyFrac(drag.base,fromX(e.clientX));
-  });
-  bar.addEventListener('pointermove',e=>{
-   if(!drag||e.pointerId!==drag.id)return;
-   e.preventDefault();
-   if(drag.parked){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>12)drag.moved=true;return}
-   applyFrac(drag.base,fromX(e.clientX));
-  });
-  const up=e=>{
-   if(!drag||e.pointerId!==drag.id)return;
-   const tap=drag.parked&&!drag.moved;
-   drag=null;shown=null;document.body.classList.remove('fracDrag');
-   if(tap){const raw=readCount(countEl.value,true);const base=(raw==null||Number.isNaN(raw))?0:raw;let n=Math.round((base+0.5)*10)/10;if(n<0)n=0;countEl.value=String(n)}
-   paintFrac();paintStrip();
-  };
-  bar.addEventListener('pointerup',up);
-  bar.addEventListener('pointercancel',e=>{if(!drag||e.pointerId!==drag.id)return;drag=null;shown=null;document.body.classList.remove('fracDrag');paintFrac()});
-  bar.addEventListener('touchmove',e=>{if(drag)e.preventDefault()},{passive:false});
-  bar.addEventListener('keydown',e=>{
-   if(bar.classList.contains('off'))return;
-   const raw=readCount(countEl.value,true);
-   const blank=raw==null||Number.isNaN(raw);
-   const n=blank?0:raw;
-   if(blank||fracPart(n)===0){
-    if(e.key==='ArrowRight'||e.key==='ArrowUp'||e.key==='End'){e.preventDefault();countEl.value=String(Math.round((n+0.5)*10)/10);shown=null;paintFrac();paintStrip()}
-    else if(e.key==='ArrowLeft'||e.key==='ArrowDown'||e.key==='Home')e.preventDefault();
-    return;
-   }
-   const base=Math.floor(n+1e-9);
-   let f=fracPart(n);
-   if(e.key==='ArrowRight'||e.key==='ArrowUp')f=Math.min(1,Math.round((f+0.1)*10)/10);
-   else if(e.key==='ArrowLeft'||e.key==='ArrowDown')f=Math.max(0,Math.round((f-0.1)*10)/10);
-   else if(e.key==='Home')f=0;
-   else if(e.key==='End')f=1;
-   else return;
-   e.preventDefault();
-   shown=null;applyFrac(base,f);shown=null;paintFrac();
-  });
- }
+ countEl.addEventListener('input',()=>{frac1.reset();frac1.paint();paintStrip()});
+ if(c2el)c2el.addEventListener('input',()=>{frac2.reset();frac2.paint();paintStrip()});
  form.querySelector('#shCancel').onclick=()=>closeSheet();
  form.onsubmit=e=>{
   e.preventDefault();
@@ -292,7 +301,7 @@ function openCountSheet(id){
   if(lab){if(n2===null)delete d.counts2[id];else d.counts2[id]=n2}else delete d.counts2[id];
   save();render();
  };
- paintFrac();
+ fracs.forEach(f=>f.paint());
  const first=countEl;
  setTimeout(()=>{if(first&&!first.disabled)first.focus();else form.querySelector('#shSkip').focus()},0);
 }
@@ -553,7 +562,7 @@ function historyTab(){ // (not named "history": that would hide the browser's wi
 // DATABASE
 function database(){
  document.body.classList.toggle('reorder',reorderMode);
- let h=`<div class="bar"><button id="addH">+ Add header</button><button id="reorderBtn" class="light sm reorderBtn${reorderMode?' on':''}" aria-pressed="${reorderMode}">${reorderMode?'Done':'Reorder'}</button><span style="flex:1"></span><span class="hsw muted">Header style: <button class="sm ${hsOn('border')?'on':''}" data-hs="border" aria-pressed="${hsOn('border')}">Border</button><button class="sm ${hsOn('tint')?'on':''}" data-hs="tint" aria-pressed="${hsOn('tint')}">Tint</button></span></div>`;
+ let h=`<div class="bar dbBar"><button id="addH">+ Add header</button><button id="reorderBtn" class="light sm reorderBtn${reorderMode?' on':''}" aria-pressed="${reorderMode}">${reorderMode?'Done':'Reorder'}</button><span class="dbSpacer" style="flex:1"></span><span class="hsw muted"><span class="hsLbl">Header style:</span> <button class="sm ${hsOn('border')?'on':''}" data-hs="border" aria-pressed="${hsOn('border')}">Border</button><button class="sm ${hsOn('tint')?'on':''}" data-hs="tint" aria-pressed="${hsOn('tint')}">Tint</button></span></div>`;
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="header name">
   <button class="sm addI" data-g="${gi}">+ Add item</button><button class="light sm mvH" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button class="light sm mvH" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button class="danger sm delH" data-g="${gi}" aria-label="delete header">✕</button></div>`;

@@ -244,6 +244,19 @@ button.stepBtn:active{background:#3b2a20}
 .stepRow.off{opacity:.4}
 .sheetLoc{margin:12px 0 4px;padding:12px 14px;border:1px solid #d6c8bc;border-radius:12px;background:#f6f2ee;color:#5b3a29;font-weight:700}
 .sheetC2Loc{margin:-4px 0 4px;padding:8px 14px;border:1px solid #e4d5c8;border-radius:12px;background:#fbf7f4;color:#6d5a4f;font-weight:600;overflow-wrap:anywhere}
+.fracBar+.sheetC2Loc{margin-top:0}
+
+/* Phone: lists and cards on every tab run to the screen edges. Inner padding keeps the text in. */
+@media(max-width:480px){
+ main{max-width:none;padding:8px 0 20px}
+ main>.muted,main>.bar,main>.histHead,main>p,main>.overhead>.bar,main>.overhead>.ohRange{padding-left:16px;padding-right:16px}
+ main .card,main .hist,main .vHead,main .forYouCard{border-radius:0}
+ /* Database toolbar: one row, every control the compact size of Border and Tint (the smallest), at least 36px tall. */
+ .dbBar{flex-wrap:nowrap;gap:4px;align-items:center;margin-bottom:10px}
+ .dbBar .dbSpacer,.dbBar .hsLbl{display:none}
+ .dbBar .hsw{display:contents}
+ .dbBar #addH,.dbBar .reorderBtn,.dbBar .hsw button{flex:1 1 0;min-width:0;min-height:36px;height:36px;padding:0 4px;font-size:.75rem;font-weight:600;letter-spacing:0;white-space:nowrap}
+}
 .sheet .afield .opt{font-weight:500;font-size:.82rem}
 .suggestList{display:flex;flex-direction:column;margin-top:4px;padding:4px;background:#fffdfb;border:1px solid #d6c8bc;border-radius:10px;box-shadow:0 6px 16px rgba(43,33,28,.08);max-height:176px;overflow:auto}
 .suggestList button{width:100%;min-height:44px;background:transparent;color:#2b211c;border-radius:8px;justify-content:flex-start;font-weight:500;padding:0 12px;text-align:left;touch-action:manipulation;box-shadow:none}

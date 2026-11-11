@@ -266,9 +266,11 @@ button.stepBtn:active{background:#3b2a20}
 .hrow.ghead{gap:4px;align-items:center;margin:0 -14px 0;padding:2px 14px;min-height:0;border:0;border-bottom:2px solid #c9864a;border-radius:0;background:transparent;box-shadow:none}
 .hrow.ghead input.hname{flex:1 1 auto;width:auto;min-width:0;min-height:0;height:36px;border:0;border-radius:8px;background:transparent;padding:0 2px;text-align:left;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.15rem;line-height:1;letter-spacing:.02em;color:#5b3a29}
 .hrow.ghead input.hname:focus{outline:2px solid #c9864a;background:rgba(255,253,251,.8)}
-.dbCount{flex:none;min-width:1.35rem;padding:1px 7px;border-radius:999px;background:#efe4d8;color:#8b786c;font-size:.72rem;font-weight:700;line-height:1.45;text-align:center}
 .hrow.ghead button{flex:none;width:36px;min-width:36px;height:36px;min-height:36px;padding:0;border-radius:8px;background:transparent;color:#8a5a3c;font-size:1.05rem;font-weight:650;box-shadow:none}
 .hrow.ghead button.delH{color:#b3402f}
+.hrow.ghead button.addI{width:auto;min-width:0;height:26px;min-height:26px;padding:0 10px;border:1px solid #c9864a;border-radius:999px;background:#f6efe6;color:#5b3a29;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;font-weight:650;line-height:1;letter-spacing:0;position:relative}
+.hrow.ghead button.addI::after{content:"";position:absolute;left:-6px;right:-6px;top:-5px;bottom:-5px}
+.hrow.ghead button.addI:active{background:#efe4d8}
 .hrow.ghead button:active{background:rgba(201,134,74,.22)}
 .card>.hrow.ghead+.item{border-top:0;padding-top:6px}
 .card>.hrow.ghead+.muted{padding-top:6px}

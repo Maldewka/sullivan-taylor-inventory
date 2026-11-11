@@ -15,8 +15,9 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{if(b.dataset
 let printMode=false; // on-screen print-friendly view (not persisted)
 function render(){closeSheet();document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
 // snapshot helpers
-// Primary count is the only number that feeds below-par, the Order List, and Overhead.
-// count2 / count2Label are kept for reference when an item is counted in a second unit.
+// On-hand for ordering is the primary count plus the second count. count2Label is a name only
+// (a place, bags, cases); the app does not convert units, so the two numbers are added as entered.
+// A blank side counts as 0 when the other side has a number. Both blank, or a skipped item, is not counted.
 // location is where the item sits in the store. count2Location is the place for the second count.
 // vendor is the optional supplier. All three are optional free text. None is a catalog header.
 // Missing or blank means none. A leftover halfStep on an old item is ignored.
@@ -29,10 +30,18 @@ function freeze(counts,skipped={},counts2={}){return S.headers.map(h=>({name:h.n
  if(label)row.count2=counts2[i.id]??null;
  return row})}))}
 function orderNeed(par,count){return Math.ceil(+(par-count).toFixed(6))} // same shortfall the Order List and Overhead use
-function shortList(groups){return (groups||[]).map(g=>({name:g.name,items:(g.items||[]).filter(i=>!i.skipped&&i.count!==null&&i.count<i.par).map(i=>({...i,need:orderNeed(i.par,i.count)}))})).filter(g=>g.items.length)}
+function qtyNum(v){if(typeof v==='number')return isFinite(v)?v:null;if(v==null||v==='')return null;const n=Number(v);return isFinite(n)?n:null}
+function onHandOf(i){ // null = not counted. Otherwise primary + second, with one blank side treated as 0.
+ if(!i||i.skipped)return null;
+ const secondLabel=String(i.count2Label||'').trim();
+ const primary=qtyNum(i.count),second=secondLabel?qtyNum(i.count2):null;
+ if(primary==null&&second==null)return null;
+ return Math.round(((primary==null?0:primary)+(second==null?0:second))*1000)/1000;
+}
+function shortList(groups){return (groups||[]).map(g=>({name:g.name,items:(g.items||[]).filter(i=>{const have=onHandOf(i);return have!=null&&have<i.par}).map(i=>{const have=onHandOf(i);return {...i,have,need:orderNeed(i.par,have)}})})).filter(g=>g.items.length)}
 function latest(){return S.snapshots[S.snapshots.length-1]}
 // allowDecimal false = whole units. Missing keeps the old decimal number-input behavior.
-// count2Label empty/missing = a single count. Ordering never uses the second count.
+// count2Label empty/missing = a single count. A label does not change the unit; ordering adds the numbers.
 // location, count2Location, and vendor are optional free text. Non-strings and blanks are unset so older items load cleanly.
 // Steppers always move by 1. A fraction slider, only for decimal items, edits the tenths.
 const itemDecimal=i=>!i||i.allowDecimal!==false;
@@ -183,10 +192,14 @@ function openCountSheet(id){
  const paintStrip=()=>{
   const skipOn=form.querySelector('#shSkip').getAttribute('aria-pressed')==='true';
   const raw=readCount(countEl.value,dec);
+  const c2el=form.querySelector('#shCount2');
+  const raw2=c2el?readCount(c2el.value,dec):null;
   const hand=form.querySelector('#shOnHand'),ord=form.querySelector('#shOrder');
-  if(skipOn||raw==null||Number.isNaN(raw)){hand.textContent='On hand: —';ord.textContent='Order —';return}
-  const need=raw<i.par?orderNeed(i.par,raw):0;
-  hand.textContent='On hand: '+String(Math.round(raw*1000)/1000);
+  if(skipOn||Number.isNaN(raw)||Number.isNaN(raw2)){hand.textContent='On hand: —';ord.textContent='Order —';return}
+  const have=onHandOf({count:raw,count2:raw2,count2Label:lab});
+  if(have==null){hand.textContent='On hand: —';ord.textContent='Order —';return}
+  const need=have<i.par?orderNeed(i.par,have):0;
+  hand.textContent='On hand: '+String(have);
   ord.textContent='Order '+need;
  };
  const applySkip=on=>{
@@ -202,9 +215,12 @@ function openCountSheet(id){
  form.querySelector('#shSkip').onclick=()=>{applySkip(form.querySelector('#shSkip').getAttribute('aria-pressed')!=='true');paintFrac()};
  form.querySelectorAll('.stepBtn').forEach(b=>b.onclick=()=>{
   nudge(form.querySelector('#'+b.dataset.for),+b.dataset.dir,dec,1); // always one whole unit; a leftover halfStep is ignored
-  if(b.dataset.for==='shCount'){shown=null;paintFrac();paintStrip()}
+  if(b.dataset.for==='shCount'){shown=null;paintFrac()}
+  paintStrip();
  });
  countEl.addEventListener('input',()=>{shown=null;paintFrac();paintStrip()});
+ const c2el=form.querySelector('#shCount2');
+ if(c2el)c2el.addEventListener('input',paintStrip);
  if(bar){
   const fromX=x=>{const r=bar.getBoundingClientRect();const w=r.width||1;let t=(x-r.left)/w;if(t<0)t=0;if(t>1)t=1;return Math.round(t*10)/10};
   const applyFrac=(base,frac)=>{
@@ -377,12 +393,12 @@ function orderVendorHtml(s){
  return keys.map(k=>{
   const b=map.get(k),n=b.items.length;
   return `<section class="vGroup"><div class="vHead"><h3>${esc(b.label)}</h3><span class="vCount">${n} ${n===1?'item':'items'}</span></div><div class="card vCard">`+
-   b.items.map(i=>`<div class="item vItem"><div class="name">${esc(i.name)}<div class="muted vHave">Have ${esc(i.count)}, par ${esc(i.par)}</div></div><span class="vNeed"><span class="vNeedLbl">Order</span>${esc(i.need)}</span></div>`).join('')+
+   b.items.map(i=>`<div class="item vItem"><div class="name">${esc(i.name)}<div class="muted vHave">Have ${esc(i.have)}, par ${esc(i.par)}</div></div><span class="vNeed"><span class="vNeedLbl">Order</span>${esc(i.need)}</span></div>`).join('')+
    `</div></section>`;
  }).join('');
 }
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
- return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.count} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
+ return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.have} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
 function count2Note(i){const label=String(i&&i.count2Label||'').trim();if(!label||i.count2==null)return '';const loc=itemCount2Loc(i);return ` <span class="muted c2note">· ${esc(i.count2)} ${esc(label)}${loc?` · ${esc(loc)}`:''}</span>`}
 function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);const place=itemLoc(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${place?`<div class="muted locNote">${esc(place)}</div>`:''}${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
@@ -493,7 +509,7 @@ function orderReceiptHtml(){ // To order print: one saved count's order list (de
   body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`;
   if(!L.length)body+=`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
   else{const M=costGroups(L);
-   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.count} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
+   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.have} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
     +`<div class="rRule"></div><div class="rOLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
  return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rHeading">To order</h2>${body}</section>`}
 function overheadReceiptHtml(){ // Overhead print: the History Overhead report for the chosen window + end date

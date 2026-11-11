@@ -252,9 +252,9 @@ button.stepBtn:active{background:#3b2a20}
  main>.muted,main>.bar,main>.histHead,main>p,main>.overhead>.bar,main>.overhead>.ohRange{padding-left:16px;padding-right:16px}
  main .card,main .hist,main .vHead,main .forYouCard{border-radius:0}
  /* Database toolbar: one row. Visible buttons are short; the hit area stays about 36px. */
- .dbBar,main>.dbBar{flex-wrap:nowrap;gap:8px;align-items:center;justify-content:center;margin-bottom:10px;padding-left:0;padding-right:0}
+ .dbBar,main>.dbBar{flex-wrap:nowrap;gap:0;align-items:center;justify-content:space-evenly;margin-bottom:10px;padding-left:0;padding-right:0}
  .dbBar .dbSpacer,.dbBar .hsLbl{display:none}
- .dbBar .hsw{display:contents}
+ .dbBar .hsw{display:inline-flex;align-items:center;gap:8px}
  .dbBar #addH,.dbBar .reorderBtn,.dbBar .hsw button{position:relative;flex:0 0 auto;min-width:0;height:26px;min-height:26px;padding:0 8px;font-size:12px;line-height:1;font-weight:600;letter-spacing:0;white-space:nowrap}
  .dbBar #addH::after,.dbBar .reorderBtn::after,.dbBar .hsw button::after{content:"";position:absolute;left:0;right:0;top:-5px;bottom:-5px}
  .hrow.ghead{flex-wrap:nowrap}

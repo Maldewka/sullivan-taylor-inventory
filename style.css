@@ -251,11 +251,12 @@ button.stepBtn:active{background:#3b2a20}
  main{max-width:none;padding:8px 0 20px}
  main>.muted,main>.bar,main>.histHead,main>p,main>.overhead>.bar,main>.overhead>.ohRange{padding-left:16px;padding-right:16px}
  main .card,main .hist,main .vHead,main .forYouCard{border-radius:0}
- /* Database toolbar: one row, every control the compact size of Border and Tint (the smallest), at least 36px tall. */
- .dbBar{flex-wrap:nowrap;gap:4px;align-items:center;margin-bottom:10px}
+ /* Database toolbar: one row. Visible buttons are short; the hit area stays about 36px. */
+ .dbBar{flex-wrap:nowrap;gap:6px;align-items:center;margin-bottom:10px}
  .dbBar .dbSpacer,.dbBar .hsLbl{display:none}
  .dbBar .hsw{display:contents}
- .dbBar #addH,.dbBar .reorderBtn,.dbBar .hsw button{flex:1 1 0;min-width:0;min-height:36px;height:36px;padding:0 4px;font-size:.75rem;font-weight:600;letter-spacing:0;white-space:nowrap}
+ .dbBar #addH,.dbBar .reorderBtn,.dbBar .hsw button{position:relative;flex:0 0 auto;min-width:0;height:26px;min-height:26px;padding:0 8px;font-size:12px;line-height:1;font-weight:600;letter-spacing:0;white-space:nowrap}
+ .dbBar #addH::after,.dbBar .reorderBtn::after,.dbBar .hsw button::after{content:"";position:absolute;left:0;right:0;top:-5px;bottom:-5px}
  .hrow.ghead{flex-wrap:nowrap}
  .hrow.ghead input.hname{flex:1 1 auto;min-height:0;height:36px}
  .hrow.ghead .addI{flex:none}

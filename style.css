@@ -268,14 +268,13 @@ body.reorder .dbEdit{display:none}
  .dbItem .dbName .iname{flex:0 0 auto;width:100%}
 }
 
-/* Count sheet: half steps, fraction bar, and the on-hand / order strip.
-   The bar uses pointer events. touch-action:none keeps the page from scrolling while a finger drags. */
+/* Count sheet fraction bar. A whole count parks it dimmed at 0.5. touch-action:none
+   keeps the page from scrolling while a finger drags. */
 .sheet .sheetPar{font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;letter-spacing:.03em;font-size:1.05rem;color:#8a5a3c}
-button.halfBtn{width:100%;min-height:46px;margin:2px 0 8px;padding:8px 12px;background:#f3eadf;color:#5b3a29;font-weight:700;border-radius:12px;box-shadow:inset 0 0 0 1px #e4d3c4;line-height:1.25;white-space:normal;text-align:center;touch-action:manipulation}
-button.halfBtn.on{background:#ead4bc;box-shadow:inset 0 0 0 2px #8a5a3c}
-button.halfBtn.off,button.halfBtn:disabled{opacity:.45}
 .fracBar{position:relative;height:52px;margin:0 0 8px;border-radius:14px;background:#f6f2ee;border:1px solid #e0d2c6;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;overflow:hidden;cursor:ew-resize}
-.fracBar.off{opacity:.4;pointer-events:none}
+.fracBar.parked{opacity:.45;cursor:pointer}
+.fracBar.parked .fracRead{color:#8b786c;background:#f3ebe3}
+.fracBar.off,.fracBar.off.parked{opacity:.4;pointer-events:none;cursor:default}
 .fracFill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#f0d7bc,#c9864a);pointer-events:none}
 .fracMid{position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:rgba(91,58,41,.28);pointer-events:none}
 .fracRead{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;min-width:64px;padding:2px 12px;border-radius:999px;background:#fffdfb;box-shadow:0 1px 3px rgba(43,33,28,.16);text-align:center;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.35rem;line-height:1.2;color:#3b2a20;font-variant-numeric:tabular-nums;pointer-events:none}
@@ -325,3 +324,23 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 .fyNowLab{color:#f0c48a!important;letter-spacing:.04em;text-transform:uppercase;font-size:.58rem}
 .fyNote,.fyEmpty{margin:8px 0 0;font-size:.8rem;color:#d9c4b4;line-height:1.35}
 .forYouCard h2+.fyNote{margin-top:0}
+
+/* New item / Edit item. Each field is a full-width band. Shades alternate down the
+   whole sheet, like a spreadsheet, and do not restart at each group. */
+#shItemForm .sheetBody{padding:4px 0 0}
+#shItemForm h2{padding:0 16px 2px}
+#shItemForm .fieldGroup{margin:0;padding:0}
+#shItemForm .fieldHead{margin:0;padding:8px 16px 3px;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:#5b3a29;line-height:1.2}
+#shItemForm .fieldRow{display:flex;flex-direction:column;gap:2px;margin:0;padding:7px 16px 8px;border-radius:0}
+#shItemForm .fieldRow.z0{background:#f3ebe3}
+#shItemForm .fieldRow.z1{background:#e4cdb8}
+#shItemForm .fieldLbl{font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5b3a29;line-height:1.2}
+#shItemForm .fieldLbl .opt{text-transform:none;letter-spacing:0;font-weight:600;font-size:.72rem;color:#8b786c}
+#shItemForm .fieldHelp{margin:0;font-size:.75rem;font-weight:500;line-height:1.25;color:#8b786c}
+#shItemForm .fieldRow input:not([type=checkbox]),
+#shItemForm .fieldRow select{width:100%;min-height:44px;font:inherit;font-weight:500;border:1px solid #c9b5a4;border-radius:8px;padding:0 12px;background:#fff;text-align:left;color:#2b211c}
+#shItemForm .fieldRow.isCheck{flex-direction:row;align-items:flex-start;gap:10px}
+#shItemForm .isCheck{display:flex;flex-direction:row;align-items:flex-start;gap:10px;margin:0}
+#shItemForm .checkCopy{display:flex;flex-direction:column;gap:1px;min-width:0}
+#shItemForm .isCheck input{width:22px;height:22px;min-height:22px;flex:0 0 22px;margin:1px 0 0;padding:0}
+#shItemForm .fieldRow>.suggestList{flex:none}

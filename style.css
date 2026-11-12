@@ -318,6 +318,7 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 .sheetStrip{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 8px;padding:8px 12px;background:#f6f2ee;border-radius:12px;color:#5b3a29;font-weight:700}
 .sheetStrip #shOnHand{font-size:.95rem}
 .sheetStrip #shOrder{font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.35rem;letter-spacing:.02em;color:#8a5a3c;font-variant-numeric:tabular-nums}
+.packEq{margin:0 0 8px;padding:10px 12px;border-radius:12px;background:#f6efe6;color:#5b3a29;font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
 .sheetFoot .sheetSkip{margin-top:0}
 
 /* Order List grouped by vendor. Amounts only — no prices. */
@@ -331,6 +332,7 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 .vHave{font-size:.78rem;line-height:1.2;font-weight:500}
 .vNeed{display:flex;flex-direction:column;align-items:flex-end;flex:none;min-width:52px;line-height:1;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.9rem;color:#8a5a3c;font-variant-numeric:tabular-nums}
 .vNeedLbl{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b786c;margin-bottom:2px}
+.vNeedUnit{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8b786c}
 
 /* History: private cost card. Plain CSS bars, no chart library. */
 .forYou{margin:0 0 16px}

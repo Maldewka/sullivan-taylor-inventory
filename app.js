@@ -16,15 +16,20 @@ let printMode=false; // on-screen print-friendly view (not persisted)
 function render(){closeSheet();document.body.classList.toggle('printView',printMode);if(printMode)return printView();document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));({inventory,orders,database,history:historyTab})[tab]()}
 // snapshot helpers
 // On-hand for ordering is the primary count plus the second count. count2Label is a name only
-// (a place, bags, cases); the app does not convert units, so the two numbers are added as entered.
-// A blank side counts as 0 when the other side has a number. Both blank, or a skipped item, is not counted.
+// (a place, bags, cases). A blank side counts as 0 when the other side has a number.
+// Both blank, or a skipped item, is not counted.
+// A pack (unitsPerCase + unitName + reorderBelow) is optional. The count is still entered in
+// the small unit (sleeves). On-hand cases = that sum / unitsPerCase. The order list uses the
+// reorder point, and the quantity is PAR minus on-hand, rounded up to whole cases.
+// Cost stays the case price. Items and saved counts without a complete pack keep the plain
+// PAR comparison, so older data is unchanged.
 // location is where the item sits in the store. count2Location is the place for the second count.
 // vendor is the optional supplier. All three are optional free text. None is a catalog header.
 // Missing or blank means none. A leftover halfStep on an old item is ignored.
 function freeze(counts,skipped={},counts2={}){return S.headers.map(h=>({name:h.name,items:h.items.map(i=>{
  const label=String(i.count2Label||'').trim();
- const loc2=itemCount2Loc(i),place=itemLoc(i),vend=itemVendor(i);
- const stamp=row=>{if(place)row.location=place;if(vend)row.vendor=vend;if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}return row};
+ const loc2=itemCount2Loc(i),place=itemLoc(i),vend=itemVendor(i),pack=packOf(i);
+ const stamp=row=>{if(place)row.location=place;if(vend)row.vendor=vend;if(label){row.count2Label=label;if(loc2)row.count2Location=loc2}if(pack){row.unitsPerCase=pack.units;row.unitName=pack.unit;row.reorderBelow=pack.below}return row};
  if(skipped[i.id])return stamp({name:i.name,par:i.par,count:null,skipped:true});
  const row=stamp({name:i.name,par:i.par,count:counts[i.id]??null});
  if(label)row.count2=counts2[i.id]??null;
@@ -38,7 +43,34 @@ function onHandOf(i){ // null = not counted. Otherwise primary + second, with on
  if(primary==null&&second==null)return null;
  return Math.round(((primary==null?0:primary)+(second==null?0:second))*1000)/1000;
 }
-function shortList(groups){return (groups||[]).map(g=>({name:g.name,items:(g.items||[]).filter(i=>{const have=onHandOf(i);return have!=null&&have<i.par}).map(i=>{const have=onHandOf(i);return {...i,have,need:orderNeed(i.par,have)}})})).filter(g=>g.items.length)}
+// A pack is set only when all three pieces are usable. Anything else is a normal item.
+function packOf(i){
+ if(!i)return null;
+ const units=qtyNum(i.unitsPerCase),below=qtyNum(i.reorderBelow);
+ const unit=typeof i.unitName==='string'?i.unitName.trim():'';
+ if(units==null||!(units>0)||below==null||below<0||!unit)return null;
+ return {units,unit,below};
+}
+function fmtNum(n){return String(Math.round(n*1000)/1000)}
+function fmtCases(n){return String(Math.round(n*100)/100)}
+function caseWord(n){const r=Math.round(Math.abs(n)*100)/100;return r>0&&r<=1?'case':'cases'}
+function fmtCaseQty(n){return fmtCases(n)+' '+caseWord(n)}
+function orderMath(row){ // null = not counted. listed = it belongs on the Order List.
+ const units=onHandOf(row);
+ if(units==null)return null;
+ const pack=packOf(row);
+ if(!pack){
+  const listed=units<row.par;
+  return {pack:null,units,haveShown:units,need:listed?orderNeed(row.par,units):0,listed,eq:''};
+ }
+ const cases=units/pack.units,rawNeed=orderNeed(row.par,cases),listed=cases<pack.below&&rawNeed>0;
+ return {pack,units,cases,haveShown:Math.round(cases*100)/100,need:listed?rawNeed:0,listed,eq:fmtNum(units)+' '+pack.unit+' = '+fmtCaseQty(cases)};
+}
+function shortList(groups){return (groups||[]).map(g=>({name:g.name,items:(g.items||[]).filter(i=>{const m=orderMath(i);return !!m&&m.listed}).map(i=>{const m=orderMath(i);return {...i,have:m.haveShown,need:m.need}})})).filter(g=>g.items.length)}
+function orderHaveText(i){const pack=packOf(i);return pack?`Have ${fmtCaseQty(i.have)}, par ${fmtCaseQty(i.par)}`:`Have ${i.have}, par ${i.par}`}
+function orderInfoText(i){const pack=packOf(i);return pack?`have ${fmtCaseQty(i.have)} / par ${fmtCaseQty(i.par)}`:`have ${i.have} / par ${i.par}`}
+function fmtReorder(n){return String(Math.round(Number(n)*1000)/1000)} // 0.50 -> 0.5, 1.0 -> 1
+function reorderHtml(pack){return pack?`<span class="reordAt">reorder @ ${esc(fmtReorder(pack.below))}</span>`:''}
 function latest(){return S.snapshots[S.snapshots.length-1]}
 // allowDecimal false = whole units. Missing keeps the old decimal number-input behavior.
 // count2Label empty/missing = a single count. A label does not change the unit; ordering adds the numbers.
@@ -245,13 +277,17 @@ function bindFrac(bar,input,onChange){ // one fraction slider for one count fiel
 function openCountSheet(id){
  const loc=locateItem(id);if(!loc||!S.draft)return;
  const d=S.draft;d.counts=d.counts||{};d.counts2=d.counts2||{};d.skipped=d.skipped||{};
- const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id];
+ const i=loc.item,dec=itemDecimal(i),lab=itemCount2(i),loc2=itemCount2Loc(i),place=itemLoc(i),sk=!!d.skipped[id],pack=packOf(i);
  const c2frac=dec&&lab?fracHtml('shFrac2','Fractional part of the second count'):'';
- const c2ui=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+c2frac+(loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:''):'';
+ const c2step=lab?stepHtml(lab,'shCount2',sk?null:d.counts2[id],dec)+c2frac:'';
+ const c2locUi=lab&&loc2?`<div class="sheetC2Loc">Location: ${esc(loc2)}</div>`:'';
  const placeUi=place?`<div class="sheetLoc">Location: ${esc(place)}</div>`:'';
+ const eqUi=pack?`<p class="packEq" id="shPackEq" aria-live="polite"></p>`:'';
+ const parLine=pack?`Par ${fmtCaseQty(i.par)}`:`Par ${i.par}`;
+ const countLbl=pack?pack.unit:'Count';
  // Fraction bars are only for decimal items. A whole count leaves its own bar dimmed at 0.5 until a tap adds a half.
  const fracUi=dec?fracHtml('shFrac','Fractional part of the count'):'';
- const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">Par ${esc(i.par)}</p>${stepHtml('Count','shCount',sk?null:d.counts[id],dec)}${fracUi}${c2ui}${placeUi}</div><div class="sheetFoot"><div class="sheetStrip" aria-live="polite"><span id="shOnHand">On hand: —</span><span id="shOrder">Order —</span></div><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
+ const back=mountSheet(`<form class="sheet" id="shForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${esc(i.name)}</h2><p class="muted sheetPar">${esc(parLine)}${reorderHtml(pack)}</p>${stepHtml(countLbl,'shCount',sk?null:d.counts[id],dec)}${fracUi}${c2step}${eqUi}${c2locUi}${placeUi}</div><div class="sheetFoot"><div class="sheetStrip" aria-live="polite"><span id="shOnHand">On hand: —</span><span id="shOrder">Order —</span></div><button type="button" class="light sheetSkip" id="shSkip">Skip</button><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const countEl=form.querySelector('#shCount');
  const c2el=form.querySelector('#shCount2');
@@ -260,12 +296,14 @@ function openCountSheet(id){
   const raw=readCount(countEl.value,dec);
   const raw2=c2el?readCount(c2el.value,dec):null;
   const hand=form.querySelector('#shOnHand'),ord=form.querySelector('#shOrder');
-  if(skipOn||Number.isNaN(raw)||Number.isNaN(raw2)){hand.textContent='On hand: —';ord.textContent='Order —';return}
-  const have=onHandOf({count:raw,count2:raw2,count2Label:lab});
-  if(have==null){hand.textContent='On hand: —';ord.textContent='Order —';return}
-  const need=have<i.par?orderNeed(i.par,have):0;
-  hand.textContent='On hand: '+String(have);
-  ord.textContent='Order '+need;
+  const eq=form.querySelector('#shPackEq');
+  const blank=()=>{hand.textContent='On hand: —';ord.textContent='Order —';if(eq)eq.textContent=pack?'— '+pack.unit+' = —':'';};
+  if(skipOn||Number.isNaN(raw)||Number.isNaN(raw2)){blank();return}
+  const m=orderMath({...i,count:raw,count2:raw2,count2Label:lab,skipped:false});
+  if(!m){blank();return}
+  if(m.pack){hand.textContent='On hand: '+fmtCaseQty(m.cases);ord.textContent=m.need>0?'Order '+m.need+' '+caseWord(m.need):'Order 0';if(eq)eq.textContent=m.eq;return}
+  hand.textContent='On hand: '+String(m.haveShown);
+  ord.textContent='Order '+m.need;
  };
  const applySkip=on=>{
   const b=form.querySelector('#shSkip');
@@ -312,14 +350,22 @@ function openItemSheet(o){
  const decOn=isEdit?itemDecimal(cur):false,lab=isEdit?itemCount2(cur):'',loc2=lab?itemCount2Loc(cur):'';
  const place=isEdit?itemLoc(cur):''; // older items have no location; the box stays blank
  const vend=isEdit?itemVendor(cur):''; // older items have no vendor; the box stays blank
+ const pack=isEdit?packOf(cur):null;
+ const packUnits=pack?String(pack.units):'';
+ const packUnit=pack?pack.unit:'';
+ const packBelow=pack?String(pack.below):'';
  const opts=S.headers.map((h,n)=>`<option value="${n}"${n===gi?' selected':''}>${esc(h.name)}</option>`).join('');
- const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><section class="fieldGroup" aria-label="Basics"><h3 class="fieldHead">Basics</h3><label class="fieldRow z0"><span class="fieldLbl">Name</span><input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="fieldRow z1"><span class="fieldLbl">Category</span><span class="fieldHelp">The section this item is listed under.</span><select id="shCat">${opts}</select></label><label class="fieldRow z0"><span class="fieldLbl">PAR</span><span class="fieldHelp">How many to keep on hand.</span><input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label></section><section class="fieldGroup" aria-label="Ordering"><h3 class="fieldHead">Ordering</h3><label class="fieldRow z1"><span class="fieldLbl">Vendor <span class="opt">optional</span></span><span class="fieldHelp">Groups the order list.</span><input id="shVendor" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Cafe Imports, Sysco" value="${esc(vend)}"></label><label class="fieldRow z0"><span class="fieldLbl">Cost $ <span class="opt">optional</span></span><span class="fieldHelp">Per unit. Overhead only, not the order list.</span><input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label></section><section class="fieldGroup" aria-label="Where it lives"><h3 class="fieldHead">Where it lives</h3><label class="fieldRow z1"><span class="fieldLbl">Location <span class="opt">optional</span></span><span class="fieldHelp">Where it sits in the shop.</span><input id="shLoc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, bar fridge" value="${esc(place)}"></label></section><section class="fieldGroup" aria-label="Counting"><h3 class="fieldHead">Counting</h3><label class="fieldRow z0 isCheck"><input type="checkbox" id="shDec"${decOn?' checked':''}><span class="checkCopy"><span class="fieldLbl">Allow decimals</span><span class="fieldHelp">Off counts whole units. On allows numbers like 0.5.</span></span></label><div class="fieldRow z1"><label class="isCheck"><input type="checkbox" id="shC2"${lab?' checked':''}><span class="fieldLbl">Add a second count</span></label><p class="fieldHelp" id="shC2note"${lab?'':' hidden'}>The order list uses the main count only.</p></div><div id="shC2wrap"${lab?'':' hidden'}><label class="fieldRow z0"><span class="fieldLbl">Second count label</span><input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="fieldRow z1"><span class="fieldLbl">Second count location <span class="opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div></section></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
+ const back=mountSheet(`<form class="sheet" id="shItemForm" novalidate role="dialog" aria-modal="true" aria-labelledby="shTitle"><div class="sheetBody"><div class="sheetGrab" aria-hidden="true"></div><h2 id="shTitle">${isEdit?'Edit item':'New item'}</h2><section class="fieldGroup" aria-label="Basics"><h3 class="fieldHead">Basics</h3><label class="fieldRow z0"><span class="fieldLbl">Name</span><input id="shName" type="text" autocomplete="off" value="${esc(isEdit?cur.name:o.name)}"></label><label class="fieldRow z1"><span class="fieldLbl">Category</span><span class="fieldHelp">The section this item is listed under.</span><select id="shCat">${opts}</select></label><label class="fieldRow z0"><span class="fieldLbl">PAR</span><span class="fieldHelp" id="shParHelp">${pack?'How many cases to keep on hand.':'How many to keep on hand.'}</span><span class="reordAt" id="shParReord"${pack?'':` hidden`}>${pack?`reorder @ ${esc(fmtReorder(pack.below))}`:''}</span><input id="shPar" type="number" min="0" inputmode="decimal" placeholder="0" value="${isEdit?esc(cur.par??0):''}"></label></section><section class="fieldGroup" aria-label="Pack"><h3 class="fieldHead">Pack</h3><label class="fieldRow z1 isCheck"><input type="checkbox" id="shPack"${pack?' checked':''}><span class="checkCopy"><span class="fieldLbl">Comes in a case</span><span class="fieldHelp">Optional. Count the pieces inside. PAR and cost stay in cases.</span></span></label><div id="shPackWrap"${pack?'':' hidden'}><label class="fieldRow z0"><span class="fieldLbl">Units per case</span><span class="fieldHelp">How many pieces are in one case.</span><input id="shPackUnits" type="number" min="0" step="any" inputmode="decimal" placeholder="32" value="${esc(packUnits)}"></label><label class="fieldRow z1"><span class="fieldLbl">Unit name</span><span class="fieldHelp">What you count, like sleeves.</span><input id="shPackUnit" type="text" autocomplete="off" autocapitalize="off" placeholder="sleeves" value="${esc(packUnit)}"></label><label class="fieldRow z0"><span class="fieldLbl">Reorder when below</span><span class="fieldHelp">In cases. Stays off the order list until on-hand drops below this.</span><input id="shPackBelow" type="number" min="0" step="any" inputmode="decimal" placeholder="0.5" value="${esc(packBelow)}"></label></div></section><section class="fieldGroup" aria-label="Ordering"><h3 class="fieldHead">Ordering</h3><label class="fieldRow z1"><span class="fieldLbl">Vendor <span class="opt">optional</span></span><span class="fieldHelp">Groups the order list.</span><input id="shVendor" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Cafe Imports, Sysco" value="${esc(vend)}"></label><label class="fieldRow z0"><span class="fieldLbl" id="shCostLbl">${pack?'Cost per case $':'Cost $'} <span class="opt">optional</span></span><span class="fieldHelp" id="shCostHelp">${pack?'Per case. Overhead only, not the order list.':'Per unit. Overhead only, not the order list.'}</span><input id="shCost" type="text" inputmode="decimal" autocomplete="off" placeholder="optional" value="${isEdit&&hasCost(cur)?esc(cur.cost.toFixed(2)):''}"></label></section><section class="fieldGroup" aria-label="Where it lives"><h3 class="fieldHead">Where it lives</h3><label class="fieldRow z1"><span class="fieldLbl">Location <span class="opt">optional</span></span><span class="fieldHelp">Where it sits in the shop.</span><input id="shLoc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, bar fridge" value="${esc(place)}"></label></section><section class="fieldGroup" aria-label="Counting"><h3 class="fieldHead">Counting</h3><label class="fieldRow z0 isCheck"><input type="checkbox" id="shDec"${decOn?' checked':''}><span class="checkCopy"><span class="fieldLbl">Allow decimals</span><span class="fieldHelp">Off counts whole units. On allows numbers like 0.5.</span></span></label><div class="fieldRow z1"><label class="isCheck"><input type="checkbox" id="shC2"${lab?' checked':''}><span class="fieldLbl">Add a second count</span></label><p class="fieldHelp" id="shC2note"${lab?'':' hidden'}>Added to the main count. On-hand and the order list use the sum.</p></div><div id="shC2wrap"${lab?'':' hidden'}><label class="fieldRow z0"><span class="fieldLbl">Second count label</span><input id="shC2lab" type="text" autocomplete="off" placeholder="bags, cases, trays…" value="${esc(lab)}"></label><label class="fieldRow z1"><span class="fieldLbl">Second count location <span class="opt">optional</span></span><input id="shC2loc" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="walk-in, back stock…" value="${esc(loc2)}"></label></div></section></div><div class="sheetFoot"><div class="aerr" id="shErr" role="alert"></div><div class="sheetActs"><button type="button" class="light" id="shCancel">Cancel</button><button type="submit" id="shItemSave">Save</button></div></div></form>`);
  const form=back.querySelector('form');
  const c2=form.querySelector('#shC2'),wrap=form.querySelector('#shC2wrap'),note=form.querySelector('#shC2note'),labI=form.querySelector('#shC2lab'),locI=form.querySelector('#shC2loc'),err=form.querySelector('#shErr');
+ const packBox=form.querySelector('#shPack'),packWrap=form.querySelector('#shPackWrap'),packUnitsI=form.querySelector('#shPackUnits');
  bindLocSuggest(form.querySelector('#shLoc'));bindVendorSuggest(form.querySelector('#shVendor'));bindLocSuggest(locI);
  form.addEventListener('input',()=>{err.textContent=''});
+ const paintPack=()=>{const on=packBox.checked;packWrap.hidden=!on;form.querySelector('#shCostLbl').firstChild.textContent=on?'Cost per case $ ':'Cost $ ';form.querySelector('#shCostHelp').textContent=on?'Per case. Overhead only, not the order list.':'Per unit. Overhead only, not the order list.';form.querySelector('#shParHelp').textContent=on?'How many cases to keep on hand.':'How many to keep on hand.';const note=form.querySelector('#shParReord');const raw=form.querySelector('#shPackBelow').value.trim(),n=raw===''?NaN:Number(raw),show=on&&isFinite(n)&&n>=0;note.hidden=!show;note.textContent=show?'reorder @ '+fmtReorder(n):'';};
  const revealC2=()=>requestAnimationFrame(()=>{if(!c2.checked)return;const over=locI.getBoundingClientRect().bottom-form.querySelector('.sheetFoot').getBoundingClientRect().top+8;if(over>0)form.querySelector('.sheetBody').scrollTop+=over});
  c2.onchange=()=>{const on=c2.checked;wrap.hidden=!on;note.hidden=!on;err.textContent='';if(!on){labI.value='';locI.value=''}else{labI.focus();revealC2()}};
+ packBox.onchange=()=>{paintPack();err.textContent='';if(packBox.checked){packUnitsI.focus();requestAnimationFrame(()=>{const over=form.querySelector('#shPackBelow').getBoundingClientRect().bottom-form.querySelector('.sheetFoot').getBoundingClientRect().top+8;if(over>0)form.querySelector('.sheetBody').scrollTop+=over})}};
+ form.querySelector('#shPackBelow').addEventListener('input',paintPack);
  form.querySelector('#shCancel').onclick=()=>closeSheet();
  form.onsubmit=e=>{
   e.preventDefault();
@@ -333,11 +379,21 @@ function openItemSheet(o){
   if(Number.isNaN(cost)){err.textContent='Cost must be a dollar amount, like 4.50.';return}
   const allow=form.querySelector('#shDec').checked,want2=c2.checked,label=labI.value.trim(),loc2v=locI.value.trim(),placeV=form.querySelector('#shLoc').value.trim(),vendorV=form.querySelector('#shVendor').value.trim();
   if(want2&&!label){err.textContent='Name the second count, like bags or cases, or turn it off.';return}
+  let unitsPerCase=null,unitName='',reorderBelow=null;
+  if(packBox.checked){
+   const uRaw=packUnitsI.value.trim(),u=uRaw===''?NaN:Number(uRaw);
+   if(!isFinite(u)||!(u>0)){err.textContent='Units per case must be a number above 0, like 32.';packUnitsI.focus();return}
+   unitName=form.querySelector('#shPackUnit').value.trim();
+   if(!unitName){err.textContent='Name the unit you count, like sleeves.';form.querySelector('#shPackUnit').focus();return}
+   const bRaw=form.querySelector('#shPackBelow').value.trim(),b=bRaw===''?NaN:Number(bRaw);
+   if(!isFinite(b)||b<0){err.textContent='Reorder when below must be a number of cases, 0 or more, like 0.5.';form.querySelector('#shPackBelow').focus();return}
+   unitsPerCase=u;reorderBelow=b;
+  }
   const now=isEdit?locateItem(cur.id):null;
   if(isEdit&&!now){err.textContent='That item is no longer in the database.';return}
   const toGi=+form.querySelector('#shCat').value; // catalog section only; location text never creates or moves a header
   if(!S.headers[toGi]){err.textContent='Choose a category.';return}
-  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(placeV)it.location=placeV;else delete it.location;if(vendorV)it.vendor=vendorV;else delete it.vendor;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}};
+  const write=it=>{it.name=nm;it.par=par;it.allowDecimal=allow;if(cost===null)delete it.cost;else it.cost=cost;if(placeV)it.location=placeV;else delete it.location;if(vendorV)it.vendor=vendorV;else delete it.vendor;if(want2){it.count2Label=label;if(loc2v)it.count2Location=loc2v;else delete it.count2Location}else{delete it.count2Label;delete it.count2Location;if(S.draft&&S.draft.counts2)delete S.draft.counts2[it.id]}if(packBox.checked){it.unitsPerCase=unitsPerCase;it.unitName=unitName;it.reorderBelow=reorderBelow}else{delete it.unitsPerCase;delete it.unitName;delete it.reorderBelow}};
   if(isEdit){
    write(now.item);
    if(toGi!==now.gi){S.headers[now.gi].items.splice(now.ii,1);S.headers[toGi].items.push(now.item)}
@@ -402,14 +458,14 @@ function orderVendorHtml(s){
  return keys.map(k=>{
   const b=map.get(k),n=b.items.length;
   return `<section class="vGroup"><div class="vHead"><h3>${esc(b.label)}</h3><span class="vCount">${n} ${n===1?'item':'items'}</span></div><div class="card vCard">`+
-   b.items.map(i=>`<div class="item vItem"><div class="name">${esc(i.name)}<div class="muted vHave">Have ${esc(i.have)}, par ${esc(i.par)}</div></div><span class="vNeed"><span class="vNeedLbl">Order</span>${esc(i.need)}</span></div>`).join('')+
+   b.items.map(i=>{const pack=packOf(i),unit=pack?`<span class="vNeedUnit">${caseWord(i.need)}</span>`:'';return `<div class="item vItem"><div class="name">${esc(i.name)}<div class="muted vHave">${esc(orderHaveText(i))}${reorderHtml(pack)}</div></div><span class="vNeed"><span class="vNeedLbl">Order</span>${esc(i.need)}${unit}</span></div>`}).join('')+
    `</div></section>`;
  }).join('');
 }
 function orderHtml(s){const L=shortList(s.groups);if(!L.length)return`<div class="card empty">Nothing to order — everything is at or above par. 🎉</div>`;
- return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">have ${i.have} / par ${i.par}</div></div><span class="short">Order ${i.need}</span></div>`).join('')+`</div>`).join('')}
+ return L.map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>`<div class="item"><div class="name">${esc(i.name)}<div class="muted">${esc(orderInfoText(i))}${reorderHtml(packOf(i))}</div></div><span class="short">Order ${esc(i.need)}${packOf(i)?' '+caseWord(i.need):''}</span></div>`).join('')+`</div>`).join('')}
 function count2Note(i){const label=String(i&&i.count2Label||'').trim();if(!label||i.count2==null)return '';const loc=itemCount2Loc(i);return ` <span class="muted c2note">· ${esc(i.count2)} ${esc(label)}${loc?` · ${esc(loc)}`:''}</span>`}
-function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);const place=itemLoc(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${i.par}</div>${place?`<div class="muted locNote">${esc(place)}</div>`:''}${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
+function countHtml(s){return s.groups.filter(g=>g.items.length).map(g=>`<div class="card"><h3>${esc(g.name)}</h3>`+g.items.map(i=>{const c=costOf(g.name,i.name);const c2=count2Note(i);const place=itemLoc(i);return`<div class="item"><div class="name">${esc(i.name)}<div class="muted">PAR ${esc(i.par)}${reorderHtml(packOf(i))}</div>${place?`<div class="muted locNote">${esc(place)}</div>`:''}${c===null?'':`<div class="muted cCount">cost ${money(c)}</div>`}</div>${i.skipped?'<span class="muted skipTag">Skipped</span>':i.count==null?`<span class="muted">Not counted</span>${c2}`:`<b>${esc(i.count)}</b>${c2}`}</div>`}).join('')+`</div>`).join('')}
 // COST (what the shop paid per unit; Database only; used by Overhead + receipts + count detail, never on Order List/Inventory)
 const money=n=>'$'+(Math.round(n*100)/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const hasCost=i=>i&&typeof i.cost==='number'&&isFinite(i.cost);
@@ -518,7 +574,7 @@ function orderReceiptHtml(){ // To order print: one saved count's order list (de
   body=`<div class="rRange">From count ${esc(fmtDay(s.date))}</div><div class="rRule thin"></div>`;
   if(!L.length)body+=`<p class="rEmpty">Nothing to order — everything is at or above par.</p>`;
   else{const M=costGroups(L);
-   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">have ${i.have} / par ${i.par}</div>`)+rSub(g)+`</div>`).join('')
+   body+=M.groups.map(g=>`<div class="rOGroup"><div class="rHead">${esc(g.name)}</div>`+rLines(g,i=>`<div class="rOInfo">${esc(orderInfoText(i))}${reorderHtml(packOf(i))}</div>`)+rSub(g)+`</div>`).join('')
     +`<div class="rRule"></div><div class="rOLine rGrandLine"><span class="rName">ORDER TOTAL</span><span class="rDots"></span><span class="rOrderTotal">${money(M.total)}</span></div>${M.missing?`<div class="rNote">* Items without a cost (—) aren't in the order total.</div>`:''}`}}
  return`<section class="rOrder" aria-label="Order list"><div class="rRule"></div><h2 class="rHeading">To order</h2>${body}</section>`}
 function overheadReceiptHtml(){ // Overhead print: the History Overhead report for the chosen window + end date
@@ -565,7 +621,7 @@ function database(){
  let h=`<div class="bar dbBar"><button id="addH">+ Add header</button><button id="reorderBtn" class="light sm reorderBtn${reorderMode?' on':''}" aria-pressed="${reorderMode}">${reorderMode?'Done':'Reorder'}</button><span class="dbSpacer" style="flex:1"></span><span class="hsw muted"><span class="hsLbl">Header style:</span> <button class="sm ${hsOn('border')?'on':''}" data-hs="border" aria-pressed="${hsOn('border')}">Border</button><button class="sm ${hsOn('tint')?'on':''}" data-hs="tint" aria-pressed="${hsOn('tint')}">Tint</button></span></div>`;
  if(!S.headers.length)h+=`<div class="card empty">Database is empty. Tap <b>+ Add header</b> to create a category like “Coffee”.</div>`;
  S.headers.forEach((g,gi)=>{h+=`<div class="card"><div class="hrow ghead"><input type="text" class="nm hname" data-g="${gi}" value="${esc(g.name)}" aria-label="Rename ${esc(g.name)}"><button type="button" class="sm addI dbAct" data-g="${gi}" aria-label="Add item">Add item</button><button type="button" class="light sm mvH dbAct" data-g="${gi}" data-d="-1" aria-label="move up">↑</button><button type="button" class="light sm mvH dbAct" data-g="${gi}" data-d="1" aria-label="move down">↓</button><button type="button" class="danger sm delH dbAct" data-g="${gi}" aria-label="delete header">✕</button></div>`;
-  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'',place=itemLoc(i),vend=itemVendor(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${vend?`<div class="muted dbC2">Vendor: ${esc(vend)}</div>`:''}${place?`<div class="muted dbC2">${esc(place)}</div>`:''}${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}</div><label class="muted">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}"></label><label class="muted icostL">Cost $<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="cost per unit ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
+  g.items.forEach((i,ii)=>{const c2=itemCount2(i),c2loc=c2?itemCount2Loc(i):'',place=itemLoc(i),vend=itemVendor(i),pack=packOf(i);h+=`<div class="item dbItem"><div class="dbName"><input type="text" class="nm iname" data-g="${gi}" data-i="${ii}" value="${esc(i.name)}" aria-label="item name">${vend?`<div class="muted dbC2">Vendor: ${esc(vend)}</div>`:''}${place?`<div class="muted dbC2">${esc(place)}</div>`:''}${c2?`<div class="muted dbC2">Also count ${esc(c2)}${c2loc?` · ${esc(c2loc)}`:''}</div>`:''}${pack?`<div class="muted dbC2">${esc(fmtNum(pack.units)+' '+pack.unit+' per case · reorder below '+fmtCaseQty(pack.below))}</div>`:''}</div><label class="muted parLab">PAR <input type="number" min="0" class="ipar" data-g="${gi}" data-i="${ii}" value="${i.par}">${reorderHtml(pack)}</label><label class="muted icostL">${pack?'Cost per case $':'Cost $'}<input type="text" inputmode="decimal" class="icost" data-g="${gi}" data-i="${ii}" value="${hasCost(i)?i.cost.toFixed(2):''}" placeholder="cost" aria-label="${pack?'cost per case':'cost per unit'} ${esc(i.name)}"></label><button type="button" class="light sm dbEdit" data-g="${gi}" data-i="${ii}" aria-label="Edit ${esc(i.name)}">Edit</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="-1" aria-label="move item up">↑</button><button class="light sm mvI" data-g="${gi}" data-i="${ii}" data-d="1" aria-label="move item down">↓</button><button class="danger sm delI" data-g="${gi}" data-i="${ii}">✕</button></div>`});
   if(!g.items.length)h+=`<div class="muted" style="padding:8px 0">No items yet.</div>`;h+=`</div>`});
  V.innerHTML=h;const q=s=>V.querySelectorAll(s);
  q('.hsw button').forEach(b=>b.onclick=()=>{const k=b.dataset.hs;const set=HS.split(' ').filter(x=>x&&x!==k);if(!hsOn(k))set.push(k);HS=set.sort().join(' ');localStorage.setItem('coffeeInventory.headerStyle',HS);document.body.dataset.hs=HS;render()});

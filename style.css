@@ -307,6 +307,10 @@ body.reorder .dbEdit{display:none}
 /* Count sheet fraction bar. A whole count parks it dimmed at 0.5. touch-action:none
    keeps the page from scrolling while a finger drags. */
 .sheet .sheetPar{font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;letter-spacing:.03em;font-size:1.05rem;color:#8a5a3c}
+.reordAt{display:block;margin-top:1px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:.72rem;font-weight:500;letter-spacing:0;line-height:1.2;color:#8b786c;text-transform:none}
+.reordAt[hidden]{display:none}
+.parLab{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px}
+.parLab .reordAt{margin-top:0}
 .fracBar{position:relative;height:52px;margin:0 0 8px;border-radius:14px;background:#f6f2ee;border:1px solid #e0d2c6;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;overflow:hidden;cursor:ew-resize}
 .fracBar.parked{opacity:.45;cursor:pointer}
 .fracBar.parked .fracRead{color:#8b786c;background:#f3ebe3}
@@ -318,6 +322,7 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 .sheetStrip{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:0 0 8px;padding:8px 12px;background:#f6f2ee;border-radius:12px;color:#5b3a29;font-weight:700}
 .sheetStrip #shOnHand{font-size:.95rem}
 .sheetStrip #shOrder{font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.35rem;letter-spacing:.02em;color:#8a5a3c;font-variant-numeric:tabular-nums}
+.packEq{margin:0 0 8px;padding:10px 12px;border-radius:12px;background:#f6efe6;color:#5b3a29;font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
 .sheetFoot .sheetSkip{margin-top:0}
 
 /* Order List grouped by vendor. Amounts only — no prices. */
@@ -331,6 +336,7 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 .vHave{font-size:.78rem;line-height:1.2;font-weight:500}
 .vNeed{display:flex;flex-direction:column;align-items:flex-end;flex:none;min-width:52px;line-height:1;font-family:"Oswald","Arial Narrow",sans-serif;font-weight:600;font-size:1.9rem;color:#8a5a3c;font-variant-numeric:tabular-nums}
 .vNeedLbl{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8b786c;margin-bottom:2px}
+.vNeedUnit{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8b786c}
 
 /* History: private cost card. Plain CSS bars, no chart library. */
 .forYou{margin:0 0 16px}

@@ -84,7 +84,6 @@ input.rcode:focus{outline:3px solid #8a5a3c;outline-offset:1px}
 .item .mvI{display:none}
 .reorderBtn.on{background:#5b3a29;color:#fff}
 body.reorder .item .mvI{display:inline-flex;min-width:40px;padding:0}
-body.reorder .item .delI{display:none}
 @media(max-width:480px){
  body.reorder .item label.muted{font-size:0}body.reorder .item label.muted input{font-size:1rem;width:52px}
 }
@@ -392,3 +391,11 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 /* Category header arrows hidden until Reorder is on, at every width */
 .hrow.ghead button.mvH{display:none}
 body.reorder .hrow.ghead button.mvH{display:inline-flex;align-items:center;justify-content:center}
+
+/* Delete X hidden until Reorder is on (shows with the arrows), items and headers */
+.item .delI,.hrow.ghead button.delH{display:none}
+body.reorder .item .delI{display:inline-flex}
+body.reorder .hrow.ghead button.delH{display:inline-flex;align-items:center;justify-content:center}
+/* Small version label in the banner */
+.top{position:relative}
+.appver{position:absolute;right:10px;bottom:2px;font-size:10px;line-height:1;color:rgba(255,255,255,.55);pointer-events:none}

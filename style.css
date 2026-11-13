@@ -19,7 +19,7 @@ input[type=number]{width:80px;text-align:center}input.nm{flex:1;min-width:0}
 .sm{min-height:40px;padding:0 10px}.hist{width:100%;justify-content:space-between;background:#fff;color:#2b211c;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);min-height:56px}
 .split{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.split{grid-template-columns:1fr}}
 .badge{background:#b3402f;color:#fff;border-radius:999px;padding:2px 8px;font-size:.8rem;margin-left:6px}
-.ipar{width:60px}@media(max-width:480px){.item .mvI{display:none}}
+.ipar{width:60px}
 /* header style variants */
 .hsw{display:inline-flex;align-items:center;gap:4px;font-size:.85rem}
 .hsw button{background:transparent;color:#6d5a4f;border:1px solid #d6c8bc;min-height:34px;padding:0 10px;font-size:.85rem}
@@ -79,13 +79,13 @@ body[data-hs~=border] .ghead{border-color:#8a5a3c}
 .acheck{display:flex;gap:10px;align-items:center;min-height:44px;font-size:.95rem}.acheck input{width:22px;height:22px}
 input.rcode{width:100%;max-width:100%;min-width:0;min-height:60px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:clamp(1.15rem,6vw,1.6rem);font-weight:700;letter-spacing:.08em;text-align:center;background:#f6f2ee;border:2px dashed #c9ad95;border-radius:12px;padding:0 6px;color:#2b211c;user-select:all;-webkit-user-select:all;cursor:text}
 input.rcode:focus{outline:3px solid #8a5a3c;outline-offset:1px}
-/* phone item reorder mode (Database tab). Desktop: button hidden, arrows always shown. */
-.reorderBtn{display:none}
+/* Item up/down arrows stay hidden until Reorder is on, at every width.
+   The Reorder button stays visible so a desktop can turn that mode on. */
+.item .mvI{display:none}
+.reorderBtn.on{background:#5b3a29;color:#fff}
+body.reorder .item .mvI{display:inline-flex;min-width:40px;padding:0}
+body.reorder .item .delI{display:none}
 @media(max-width:480px){
- .reorderBtn{display:inline-flex;min-height:44px;padding:0 14px;font-weight:600}
- .reorderBtn.on{background:#5b3a29;color:#fff}
- body.reorder .item .mvI{display:inline-flex;min-width:40px;padding:0}
- body.reorder .item .delI{display:none}
  body.reorder .item label.muted{font-size:0}body.reorder .item label.muted input{font-size:1rem;width:52px}
 }
 .lastSaved{flex-basis:100%}

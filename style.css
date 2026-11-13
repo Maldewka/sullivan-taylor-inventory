@@ -388,3 +388,7 @@ body.fracDrag,body.fracDrag .sheetBody{overflow:hidden;touch-action:none}
 #shItemForm .checkCopy{display:flex;flex-direction:column;gap:1px;min-width:0}
 #shItemForm .isCheck input{width:22px;height:22px;min-height:22px;flex:0 0 22px;margin:1px 0 0;padding:0}
 #shItemForm .fieldRow>.suggestList{flex:none}
+
+/* Category header arrows hidden until Reorder is on, at every width */
+.hrow.ghead button.mvH{display:none}
+body.reorder .hrow.ghead button.mvH{display:inline-flex;align-items:center;justify-content:center}
